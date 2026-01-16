@@ -17,7 +17,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 option(WITH_MYSQL "Build with MySQL/MariaDB support" ON)
 option(WITH_SQLITE "Build with SQLite support" ON)
 option(WITH_POSTGRESQL "Build with PostgreSQL support" ON)
-option(WITH_ORACLE "Build with Oracle support (future)" OFF)
+option(WITH_ORACLE "Build with Oracle support" OFF)
 
 # At least one database backend must be enabled
 if(NOT WITH_MYSQL AND NOT WITH_SQLITE AND NOT WITH_POSTGRESQL AND NOT WITH_ORACLE)
@@ -48,6 +48,42 @@ if(WITH_POSTGRESQL)
     message(STATUS "PostgreSQL support: ENABLED")
 else()
     message(STATUS "PostgreSQL support: DISABLED")
+endif()
+
+if(WITH_ORACLE)
+    # Oracle Instant Client - check for OCI library
+    # The OCI SDK is typically in /usr/include/oracle or $ORACLE_HOME/sdk/include
+    # Use GLOB to find the instantclient directory since version varies
+    file(GLOB OCI_INSTANTCLIENT_DIRS "/opt/oracle/instantclient_*")
+    find_path(OCI_INCLUDE_DIR oci.h
+        PATHS
+            /usr/include/oracle/*/client64
+            /usr/include/oracle/*/client
+            $ENV{ORACLE_HOME}/sdk/include
+            $ENV{ORACLE_HOME}/rdbms/public
+            /usr/local/oracle/instantclient_*/sdk/include
+        PATH_SUFFIXES sdk/include
+        HINTS ${OCI_INSTANTCLIENT_DIRS}
+    )
+    find_library(OCI_LIBRARY NAMES clntsh oci
+        PATHS
+            /usr/lib/oracle/*/client64/lib
+            /usr/lib/oracle/*/client/lib
+            $ENV{ORACLE_HOME}/lib
+            /usr/local/oracle/instantclient_*
+        HINTS ${OCI_INSTANTCLIENT_DIRS}
+    )
+    if(OCI_INCLUDE_DIR AND OCI_LIBRARY)
+        message(STATUS "Oracle support: ENABLED")
+        message(STATUS "  OCI include dir: ${OCI_INCLUDE_DIR}")
+        message(STATUS "  OCI library: ${OCI_LIBRARY}")
+    else()
+        message(FATAL_ERROR "Oracle support requested but OCI libraries not found. "
+            "Install Oracle Instant Client with SDK: "
+            "apt install libaio1 && download from oracle.com")
+    endif()
+else()
+    message(STATUS "Oracle support: DISABLED")
 endif()
 
 # Fetch header-only dependencies
@@ -133,6 +169,17 @@ if(WITH_POSTGRESQL)
     )
 endif()
 
+if(WITH_ORACLE)
+    list(APPEND SOURCES
+        src/oracle/OracleConnection.cpp
+        src/oracle/OracleConnectionPool.cpp
+        src/oracle/OracleResultSet.cpp
+        src/oracle/OracleSchemaManager.cpp
+        src/oracle/OracleVirtualFile.cpp
+        src/oracle/OracleFormatConverter.cpp
+    )
+endif()
+
 # Main executable
 add_executable(sql-fuse ${SOURCES})
 
@@ -163,6 +210,13 @@ if(WITH_POSTGRESQL)
     )
 endif()
 
+if(WITH_ORACLE)
+    target_include_directories(sql-fuse PRIVATE
+        ${CMAKE_SOURCE_DIR}/include/oracle
+        ${OCI_INCLUDE_DIR}
+    )
+endif()
+
 # Link libraries
 target_link_libraries(sql-fuse PRIVATE
     ${FUSE3_LIBRARIES}
@@ -182,6 +236,10 @@ endif()
 
 if(WITH_POSTGRESQL)
     target_link_libraries(sql-fuse PRIVATE ${PGSQL_LIBRARIES})
+endif()
+
+if(WITH_ORACLE)
+    target_link_libraries(sql-fuse PRIVATE ${OCI_LIBRARY})
 endif()
 
 # Compile definitions

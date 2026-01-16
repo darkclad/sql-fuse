@@ -23,6 +23,11 @@
 #include "PostgreSQLSchemaManager.hpp"
 #endif
 
+#ifdef WITH_ORACLE
+#include "OracleConnectionPool.hpp"
+#include "OracleSchemaManager.hpp"
+#endif
+
 #include <fuse3/fuse.h>
 #include <memory>
 #include <string>
@@ -89,6 +94,14 @@ public:
         return nullptr;
     }
 #endif
+#ifdef WITH_ORACLE
+    OracleConnectionPool* oracleConnectionPool() {
+        if (auto* pool = std::get_if<std::unique_ptr<OracleConnectionPool>>(&m_pool)) {
+            return pool->get();
+        }
+        return nullptr;
+    }
+#endif
     SchemaManager* schemaManager() { return m_schema.get(); }
     CacheManager* cacheManager() { return m_cache.get(); }
     PathRouter* pathRouter() { return &m_router; }
@@ -140,6 +153,9 @@ private:
 #endif
 #ifdef WITH_POSTGRESQL
         , std::unique_ptr<PostgreSQLConnectionPool>
+#endif
+#ifdef WITH_ORACLE
+        , std::unique_ptr<OracleConnectionPool>
 #endif
     > m_pool;
 

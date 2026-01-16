@@ -21,6 +21,12 @@
 #include "PostgreSQLResultSet.hpp"
 #endif
 
+#ifdef WITH_ORACLE
+#include "OracleSchemaManager.hpp"
+#include "OracleFormatConverter.hpp"
+#include "OracleResultSet.hpp"
+#endif
+
 namespace sqlfuse {
 
 // Singleton instance
@@ -129,8 +135,32 @@ int SQLFuseFS::init(const Config& config) {
                 throw std::runtime_error("PostgreSQL support is not compiled in");
 #endif
 
+#ifdef WITH_ORACLE
+            case DatabaseType::Oracle: {
+                auto pool = std::make_unique<OracleConnectionPool>(
+                    m_config.connection,
+                    m_config.performance.connection_pool_size);
+
+                if (!pool->healthCheck()) {
+                    spdlog::error("Failed to connect to Oracle server");
+                    return -1;
+                }
+
+                m_pool = std::move(pool);
+
+                m_schema = std::make_unique<OracleSchemaManager>(
+                    *std::get<std::unique_ptr<OracleConnectionPool>>(m_pool), *m_cache);
+
+                m_fileHandles = std::make_unique<VirtualFileHandleManager>(
+                    *m_schema, *m_cache, m_config.data);
+
+                spdlog::info("Connected to Oracle server");
+                break;
+            }
+#else
             case DatabaseType::Oracle:
-                throw std::runtime_error("Oracle support is not yet implemented");
+                throw std::runtime_error("Oracle support is not compiled in");
+#endif
 
             default:
                 throw std::invalid_argument("Unknown database type");
@@ -741,6 +771,27 @@ int SQLFuseFS::unlink(const char* path) {
                 return -EIO;
             }
             affected_rows = static_cast<int>(conn->affectedRows(result.get()));
+        }
+#endif
+
+#ifdef WITH_ORACLE
+        if (m_dbType == DatabaseType::Oracle) {
+            std::string sql = OracleFormatConverter::buildDelete(
+                parsed.database + "." + parsed.object_name,
+                table_info->primaryKeyColumn,
+                parsed.row_id,
+                true);
+            auto* pool = std::get_if<std::unique_ptr<OracleConnectionPool>>(&m_pool);
+            if (!pool || !*pool) {
+                return -EIO;
+            }
+            auto conn = (*pool)->acquire();
+            if (!conn->executeNonQuery(sql)) {
+                spdlog::error("Oracle delete error: {}", conn->getError());
+                return -ErrorHandler::oracleToErrno(conn->getErrorCode());
+            }
+            affected_rows = static_cast<int>(conn->affectedRows());
+            conn->commit();
         }
 #endif
 

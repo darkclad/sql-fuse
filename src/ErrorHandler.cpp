@@ -93,6 +93,91 @@ int ErrorHandler::mysqlToErrno(unsigned int mysql_error) {
     }
 }
 
+int ErrorHandler::oracleToErrno(int oracle_error) {
+    // Oracle error codes are typically negative, convert to positive for comparison
+    int err = (oracle_error < 0) ? -oracle_error : oracle_error;
+
+    switch (err) {
+        // Success
+        case 0:
+            return 0;
+
+        // Connection errors (ORA-03113 to ORA-03135 range)
+        case 3113:  // ORA-03113: end-of-file on communication channel
+        case 3114:  // ORA-03114: not connected to ORACLE
+        case 3135:  // ORA-03135: connection lost contact
+        case 12170: // ORA-12170: TNS:Connect timeout
+        case 12541: // ORA-12541: TNS:no listener
+        case 12543: // ORA-12543: TNS:destination host unreachable
+            return ENOENT;
+
+        // Authentication errors
+        case 1017:  // ORA-01017: invalid username/password
+        case 1031:  // ORA-01031: insufficient privileges
+        case 1045:  // ORA-01045: user lacks CREATE SESSION privilege
+        case 28000: // ORA-28000: account is locked
+        case 28001: // ORA-28001: password has expired
+            return EACCES;
+
+        // Not found errors
+        case 942:   // ORA-00942: table or view does not exist
+        case 1403:  // ORA-01403: no data found
+        case 4043:  // ORA-04043: object does not exist
+        case 4080:  // ORA-04080: trigger does not exist
+        case 4098:  // ORA-04098: trigger is invalid
+            return ENOENT;
+
+        // Already exists errors
+        case 1:     // ORA-00001: unique constraint violated
+        case 955:   // ORA-00955: name is already used
+        case 2260:  // ORA-02260: table can have only one primary key
+            return EEXIST;
+
+        // Invalid input errors
+        case 900:   // ORA-00900: invalid SQL statement
+        case 903:   // ORA-00903: invalid table name
+        case 904:   // ORA-00904: invalid identifier
+        case 911:   // ORA-00911: invalid character
+        case 917:   // ORA-00917: missing comma
+        case 923:   // ORA-00923: FROM keyword not found
+        case 936:   // ORA-00936: missing expression
+        case 1722:  // ORA-01722: invalid number
+        case 1756:  // ORA-01756: quoted string not properly terminated
+        case 12899: // ORA-12899: value too large for column
+            return EINVAL;
+
+        // Constraint violations
+        case 2291:  // ORA-02291: integrity constraint violated - parent key not found
+        case 2292:  // ORA-02292: integrity constraint violated - child record found
+            return EINVAL;
+
+        // Lock/timeout errors
+        case 54:    // ORA-00054: resource busy and NOWAIT specified
+        case 60:    // ORA-00060: deadlock detected
+        case 4020:  // ORA-04020: deadlock detected while trying to lock object
+        case 4021:  // ORA-04021: timeout occurred while waiting to lock object
+            return ETIMEDOUT;
+
+        // Read-only errors
+        case 16000: // ORA-16000: database or pluggable database open for read-only access
+            return EROFS;
+
+        // Disk/space errors
+        case 1536:  // ORA-01536: space quota exceeded for tablespace
+        case 1653:  // ORA-01653: unable to extend table
+        case 1654:  // ORA-01654: unable to extend index
+            return ENOSPC;
+
+        // Busy errors
+        case 257:   // ORA-00257: archiver error
+            return EBUSY;
+
+        // Default to I/O error
+        default:
+            return EIO;
+    }
+}
+
 bool ErrorHandler::isRetryable(unsigned int mysql_error) {
     switch (mysql_error) {
         case CR_SERVER_GONE_ERROR:

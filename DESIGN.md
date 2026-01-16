@@ -10,7 +10,7 @@
 - **MySQL/MariaDB** - Full support
 - **SQLite** - Full support
 - **PostgreSQL** - Full support
-- **Oracle** - Planned
+- **Oracle** - Full support
 
 ### 1.2 Goals
 - Mount SQL databases as a filesystem
@@ -439,18 +439,51 @@ class PostgreSQLResultSet {
 };
 ```
 
-### 4.4 Database Feature Matrix
+### 4.4 Oracle Backend
+
+```cpp
+class OracleConnectionPool : public ConnectionPool {
+public:
+    OracleConnectionPool(const ConnectionConfig& config, size_t poolSize = 5);
+
+    // Acquires a connection from the pool
+    std::unique_ptr<OracleConnection> acquire();
+    void releaseConnection(OCISvcCtx* svc, OCIError* err);
+};
+
+class OracleSchemaManager : public SchemaManager {
+    // Uses Oracle data dictionary views (ALL_TABLES, ALL_VIEWS, etc.)
+    // and DBMS_METADATA.GET_DDL for CREATE statements
+};
+
+class OracleVirtualFile : public VirtualFile {
+    // Handles Oracle-specific query generation and result formatting
+    // Uses FETCH FIRST N ROWS ONLY for pagination (Oracle 12c+)
+};
+
+class OracleFormatConverter : public FormatConverter {
+    // Converts OCI results to CSV/JSON
+    static std::string toCSV(OracleResultSet& result, const CSVOptions& options);
+    static std::string toJSON(OracleResultSet& result, const JSONOptions& options);
+};
+
+class OracleResultSet {
+    // Wrapper around OCIStmt with column metadata and data buffers
+};
+```
+
+### 4.5 Database Feature Matrix
 
 | Feature | MySQL | SQLite | PostgreSQL | Oracle |
 |---------|-------|--------|------------|--------|
-| Multiple databases | Yes | No (main only) | Yes | Planned |
-| Stored procedures | Yes | No | Yes | Planned |
-| User-defined functions | Yes | No | Yes | Planned |
-| Triggers | Yes | Yes | Yes | Planned |
-| Views | Yes | Yes | Yes | Planned |
-| Foreign keys | Yes | Yes | Yes | Planned |
-| Connection pooling | Yes | Limited | Yes | Planned |
-| SSL/TLS | Yes | N/A | Yes | Planned |
+| Multiple databases | Yes | No (main only) | Yes | Yes (schemas) |
+| Stored procedures | Yes | No | Yes | Yes |
+| User-defined functions | Yes | No | Yes | Yes |
+| Triggers | Yes | Yes | Yes | Yes |
+| Views | Yes | Yes | Yes | Yes |
+| Foreign keys | Yes | Yes | Yes | Yes |
+| Connection pooling | Yes | Limited | Yes | Yes |
+| SSL/TLS | Yes | N/A | Yes | Yes |
 
 ---
 
@@ -807,13 +840,20 @@ sql-fuse/
 │   │   ├── PostgreSQLResultSet.hpp
 │   │   ├── PostgreSQLSchemaManager.hpp
 │   │   └── PostgreSQLVirtualFile.hpp
-│   └── sqlite/
-│       ├── SQLiteConnection.hpp
-│       ├── SQLiteConnectionPool.hpp
-│       ├── SQLiteFormatConverter.hpp
-│       ├── SQLiteResultSet.hpp
-│       ├── SQLiteSchemaManager.hpp
-│       └── SQLiteVirtualFile.hpp
+│   ├── sqlite/
+│   │   ├── SQLiteConnection.hpp
+│   │   ├── SQLiteConnectionPool.hpp
+│   │   ├── SQLiteFormatConverter.hpp
+│   │   ├── SQLiteResultSet.hpp
+│   │   ├── SQLiteSchemaManager.hpp
+│   │   └── SQLiteVirtualFile.hpp
+│   └── oracle/
+│       ├── OracleConnection.hpp
+│       ├── OracleConnectionPool.hpp
+│       ├── OracleFormatConverter.hpp
+│       ├── OracleResultSet.hpp
+│       ├── OracleSchemaManager.hpp
+│       └── OracleVirtualFile.hpp
 ├── src/
 │   ├── main.cpp
 │   ├── CacheManager.cpp
@@ -839,13 +879,20 @@ sql-fuse/
 │   │   ├── PostgreSQLResultSet.cpp
 │   │   ├── PostgreSQLSchemaManager.cpp
 │   │   └── PostgreSQLVirtualFile.cpp
-│   └── sqlite/
-│       ├── SQLiteConnection.cpp
-│       ├── SQLiteConnectionPool.cpp
-│       ├── SQLiteFormatConverter.cpp
-│       ├── SQLiteResultSet.cpp
-│       ├── SQLiteSchemaManager.cpp
-│       └── SQLiteVirtualFile.cpp
+│   ├── sqlite/
+│   │   ├── SQLiteConnection.cpp
+│   │   ├── SQLiteConnectionPool.cpp
+│   │   ├── SQLiteFormatConverter.cpp
+│   │   ├── SQLiteResultSet.cpp
+│   │   ├── SQLiteSchemaManager.cpp
+│   │   └── SQLiteVirtualFile.cpp
+│   └── oracle/
+│       ├── OracleConnection.cpp
+│       ├── OracleConnectionPool.cpp
+│       ├── OracleFormatConverter.cpp
+│       ├── OracleResultSet.cpp
+│       ├── OracleSchemaManager.cpp
+│       └── OracleVirtualFile.cpp
 ├── docs/
 │   ├── index.md
 │   ├── getting-started.md
@@ -872,11 +919,14 @@ sql-fuse/
     │   ├── setup_test_db.sql
     │   ├── teardown_test_db.sql
     │   └── test_postgresql.sh       # Integration tests
-    └── sqlite/
-        ├── setup_test_db.sh
+    ├── sqlite/
+    │   ├── setup_test_db.sh
+    │   ├── setup_test_db.sql
+    │   ├── teardown_test_db.sh
+    │   └── test_sqlite.sh           # Integration tests
+    └── oracle/
         ├── setup_test_db.sql
-        ├── teardown_test_db.sh
-        └── test_sqlite.sh           # Integration tests
+        └── test_oracle.sh           # Integration tests
 ```
 
 ---
@@ -927,10 +977,17 @@ sql-fuse/
 - [x] Views, functions, procedures, triggers support
 - [x] Integration tests (23 tests passing)
 
-### Phase 8: Additional Backends - Future
-- [ ] Oracle backend
+### Phase 7: Oracle Backend - Complete
+- [x] Oracle connection pool with OCI (Oracle Call Interface)
+- [x] Oracle schema manager using data dictionary views
+- [x] Database (schema) and table listing
+- [x] Table data as CSV/JSON
+- [x] CREATE statement files using DBMS_METADATA.GET_DDL
+- [x] Views, functions, procedures, triggers support
+- [x] Write operations (INSERT, UPDATE, DELETE)
+- [x] Integration tests
 
-### Phase 9: Polish - Ongoing
+### Phase 8: Polish - Ongoing
 - [x] Basic error handling
 - [ ] Comprehensive error recovery
 - [ ] Performance optimization
@@ -1020,11 +1077,45 @@ cat /mnt/sqlite/main/tables/users.json
 fusermount -u /mnt/sqlite
 ```
 
+### Oracle
+
+```bash
+# Mount Oracle database using Easy Connect string (host:port/service_name)
+sql-fuse -t oracle -H dbserver:1521/ORCL -u myuser -p mypassword /mnt/oracle
+
+# Mount using TNS name (requires tnsnames.ora configuration)
+sql-fuse -t oracle -H MYDB -u myuser -p mypassword /mnt/oracle
+
+# List schemas (Oracle uses schemas instead of databases)
+ls /mnt/oracle
+# Output: MYSCHEMA  HR  SCOTT
+
+# List tables in a schema
+ls /mnt/oracle/MYSCHEMA/tables
+# Output: EMPLOYEES.csv  EMPLOYEES.json  EMPLOYEES.sql  DEPARTMENTS.csv  ...
+
+# Read table as CSV
+cat /mnt/oracle/MYSCHEMA/tables/EMPLOYEES.csv
+
+# Read individual row
+cat /mnt/oracle/MYSCHEMA/tables/EMPLOYEES/rows/1.json
+
+# View stored procedures
+ls /mnt/oracle/MYSCHEMA/procedures
+# Output: GET_EMPLOYEE_COUNT.sql  UPDATE_SALARY.sql
+
+# View functions
+ls /mnt/oracle/MYSCHEMA/functions
+# Output: CALCULATE_BONUS.sql  GET_DEPARTMENT_NAME.sql
+
+# Unmount
+fusermount -u /mnt/oracle
+```
+
 ---
 
 ## 12. Future Enhancements
 
-- **Oracle backend**: Additional database support
 - **Query interface**: Special file to execute arbitrary SQL
 - **Watch mode**: inotify-like notifications for data changes
 - **Compression**: On-the-fly compression for large results

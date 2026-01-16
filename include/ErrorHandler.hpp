@@ -10,11 +10,14 @@
 
 namespace sqlfuse {
 
-// MySQL error codes to POSIX errno mapping
+// Database error codes to POSIX errno mapping
 class ErrorHandler {
 public:
     // Convert MySQL error to errno
     static int mysqlToErrno(unsigned int mysqlError);
+
+    // Convert Oracle error to errno
+    static int oracleToErrno(int oracleError);
 
     // Check if error is retryable
     static bool isRetryable(unsigned int mysqlError);

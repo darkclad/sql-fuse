@@ -149,8 +149,13 @@ void CacheManager::invalidate(const std::string& pattern) {
 }
 
 void CacheManager::invalidateTable(const std::string& database, const std::string& table) {
-    invalidate(database + "/" + table + "/*");
-    invalidate(database + "/tables/" + table + "*");
+    // Invalidate all cache entries for this table
+    // Cache keys can be in various formats:
+    // - database/table.csv, database/table.json, database/table.sql
+    // - database/table/rows/*
+    invalidate(database + "/" + table + ".*");     // table files (csv, json, sql)
+    invalidate(database + "/" + table + "/*");     // row files and subdirs
+    invalidate(database + "/tables/" + table + "*"); // alternate path format
 }
 
 void CacheManager::invalidateDatabase(const std::string& database) {

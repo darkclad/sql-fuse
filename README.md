@@ -8,8 +8,7 @@ Mount SQL databases as a virtual filesystem using FUSE (Filesystem in Userspace)
 - MySQL/MariaDB
 - SQLite
 - PostgreSQL
-
-Oracle support planned for future releases.
+- Oracle Database
 
 ## Documentation
 
@@ -41,7 +40,7 @@ Comprehensive documentation is available in the [docs/](docs/) directory:
 - Linux with FUSE 3.x support
 - C++20 compiler (GCC 10+, Clang 12+)
 - CMake 3.16+
-- At least one database client library (MySQL, SQLite, and/or PostgreSQL)
+- At least one database client library (MySQL, SQLite, PostgreSQL, and/or Oracle)
 
 ### Ubuntu/Debian
 
@@ -57,6 +56,114 @@ sudo apt-get install libsqlite3-dev sqlite3
 
 # For PostgreSQL support
 sudo apt-get install libpq-dev postgresql-client
+
+# For Oracle support (see Oracle Instant Client section below)
+```
+
+### Oracle Instant Client Installation
+
+Oracle support requires the Oracle Instant Client with SDK (development headers). The Instant Client is a free download from Oracle but requires an Oracle account.
+
+#### Download Oracle Instant Client
+
+1. Go to the [Oracle Instant Client Downloads](https://www.oracle.com/database/technologies/instant-client/linux-x86-64-downloads.html) page
+2. Sign in with an Oracle account (free to create)
+3. Download these ZIP packages for Linux x86-64 (version 21.x or later recommended):
+   - **Basic Package** (instantclient-basic-linux.x64-21.x.x.x.x.zip) - Core libraries
+   - **SDK Package** (instantclient-sdk-linux.x64-21.x.x.x.x.zip) - Development headers (required for building)
+   - **SQL*Plus Package** (optional) - Command-line SQL tool for testing
+4. Save the downloaded ZIP files to your `~/Downloads` folder
+
+#### Ubuntu/Debian Installation
+
+```bash
+# Install required dependencies
+sudo apt-get install libaio1 unzip
+
+sudo ln -s /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
+
+
+# Extract the downloaded ZIP packages:
+sudo mkdir -p /opt/oracle
+cd /opt/oracle
+sudo unzip ~/Downloads/instantclient-basic-linux.x64-21.*.zip
+sudo unzip ~/Downloads/instantclient-sdk-linux.x64-21.*.zip
+
+# Configure library path
+echo "/opt/oracle/instantclient_21_14" | sudo tee /etc/ld.so.conf.d/oracle-instantclient.conf
+sudo ldconfig
+
+# Set environment variables (add to ~/.bashrc or ~/.profile)
+export ORACLE_HOME=/opt/oracle/instantclient_21_14
+export LD_LIBRARY_PATH=$ORACLE_HOME:$LD_LIBRARY_PATH
+export PATH=$ORACLE_HOME:$PATH
+```
+
+#### Fedora/RHEL/CentOS Installation
+
+```bash
+# Install dependencies
+sudo dnf install libaio
+
+# Download and install RPM packages directly:
+sudo rpm -ivh oracle-instantclient*-basic-*.rpm
+sudo rpm -ivh oracle-instantclient*-devel-*.rpm
+sudo rpm -ivh oracle-instantclient*-sqlplus-*.rpm  # optional
+
+# Configure library path (already done by RPM, but verify)
+sudo ldconfig
+
+# Set environment variables (add to ~/.bashrc or ~/.profile)
+export ORACLE_HOME=/usr/lib/oracle/21/client64
+export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH
+export PATH=$ORACLE_HOME/bin:$PATH
+```
+
+#### Arch Linux Installation
+
+```bash
+# Install from AUR
+yay -S oracle-instantclient-basic oracle-instantclient-sdk
+
+# Or manually download ZIP and follow Ubuntu instructions above
+```
+
+#### Verify Installation
+
+```bash
+# Check that OCI headers are available
+ls /usr/include/oracle/*/client64/  # RPM install
+# or
+ls /opt/oracle/instantclient_*/sdk/include/  # ZIP install
+
+# Check that libraries are found
+ldconfig -p | grep libclntsh
+
+# Test with SQL*Plus (if installed)
+sqlplus -V
+```
+
+#### TNS Configuration (Optional)
+
+For connecting using TNS names:
+
+```bash
+# Create TNS admin directory
+mkdir -p $ORACLE_HOME/network/admin
+
+# Create tnsnames.ora
+cat > $ORACLE_HOME/network/admin/tnsnames.ora << 'EOF'
+MYDB =
+  (DESCRIPTION =
+    (ADDRESS = (PROTOCOL = TCP)(HOST = dbserver.example.com)(PORT = 1521))
+    (CONNECT_DATA =
+      (SERVICE_NAME = ORCL)
+    )
+  )
+EOF
+
+# Set TNS_ADMIN environment variable
+export TNS_ADMIN=$ORACLE_HOME/network/admin
 ```
 
 For running the MySQL test database, you also need MySQL server:
@@ -132,7 +239,7 @@ sudo systemctl start postgresql
 
 ## Building
 
-By default, MySQL, SQLite, and PostgreSQL support are enabled (if libraries are found).
+By default, MySQL, SQLite, and PostgreSQL support are enabled (if libraries are found). Oracle support must be explicitly enabled.
 
 ```bash
 git clone <repository-url>
@@ -161,6 +268,15 @@ cmake -DWITH_MYSQL=OFF -DWITH_SQLITE=OFF -DWITH_POSTGRESQL=ON ..
 
 # Build with MySQL and PostgreSQL
 cmake -DWITH_MYSQL=ON -DWITH_SQLITE=OFF -DWITH_POSTGRESQL=ON ..
+
+# Build with Oracle support (requires Oracle Instant Client)
+cmake -DWITH_ORACLE=ON ..
+
+# Build with Oracle only
+cmake -DWITH_MYSQL=OFF -DWITH_SQLITE=OFF -DWITH_POSTGRESQL=OFF -DWITH_ORACLE=ON ..
+
+# Build with all backends including Oracle
+cmake -DWITH_MYSQL=ON -DWITH_SQLITE=ON -DWITH_POSTGRESQL=ON -DWITH_ORACLE=ON ..
 ```
 
 For debug build:
@@ -351,6 +467,36 @@ sql-fuse -t postgresql -u myuser --read-only /mnt/sql
 fusermount -u /mnt/sql
 ```
 
+### Oracle Usage
+
+```bash
+# Mount Oracle with Easy Connect string (host:port/service_name)
+sql-fuse -t oracle -H dbserver:1521/ORCL -u myuser -p mypassword /mnt/sql
+
+# Mount with TNS name (requires tnsnames.ora configuration)
+sql-fuse -t oracle -H MYDB -u myuser -p mypassword /mnt/sql
+
+# Mount with separate host, port, and service name
+sql-fuse -t oracle -H dbserver -P 1521 -D ORCL -u myuser -p mypassword /mnt/sql
+
+# Mount with SID instead of service name (use :SID syntax)
+sql-fuse -t oracle -H dbserver:1521:ORCL -u myuser -p mypassword /mnt/sql
+
+# Mount in foreground with debug output
+sql-fuse -t oracle -H dbserver:1521/ORCL -u myuser -p mypassword -f -d /mnt/sql
+
+# Mount as read-only
+sql-fuse -t oracle -H dbserver:1521/ORCL -u myuser --read-only /mnt/sql
+
+# Unmount
+fusermount -u /mnt/sql
+```
+
+**Note:** Oracle connections support several connection string formats:
+- **Easy Connect:** `host:port/service_name` or `host:port:SID`
+- **TNS Name:** A name defined in `tnsnames.ora`
+- **Full descriptor:** `(DESCRIPTION=(ADDRESS=...))`
+
 ### Using with MySQL Test Database
 
 ```bash
@@ -510,12 +656,13 @@ cat /mnt/sql/.variables/global/max_connections
 
 ```
 Database Type:
-  -t, --type <type>         Database type: mysql, sqlite, postgresql (default: mysql)
+  -t, --type <type>         Database type: mysql, sqlite, postgresql, oracle (default: mysql)
 
 Connection Options:
   -H, --host <host>         Database server host (default: localhost)
                             For SQLite: path to database file
-  -P, --port <port>         Database server port (default: 3306 MySQL, 5432 PostgreSQL)
+                            For Oracle: Easy Connect string, TNS name, or hostname
+  -P, --port <port>         Database server port (default: 3306 MySQL, 5432 PostgreSQL, 1521 Oracle)
   -u, --user <user>         Database username (required for MySQL/PostgreSQL)
   -p, --password <pass>     Database password (or use MYSQL_PWD/PGPASSWORD env)
   -S, --socket <path>       Unix socket path
