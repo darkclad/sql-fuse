@@ -1,0 +1,98 @@
+# SQL FUSE Filesystem Configuration
+# Copy this file to /etc/sql-fuse.conf or ~/.sql-fuse.conf
+
+[connection]
+# Database server host
+host = localhost
+
+# Database server port
+port = 3306
+
+# Database username
+user = db_user
+
+# Database password (prefer MYSQL_PWD environment variable for security)
+# password = secret
+
+# Unix socket path (optional, overrides host/port)
+# socket = /var/run/mysqld/mysqld.sock
+
+# Default database (optional)
+# database = mydb
+
+# Connection timeout in milliseconds
+connect_timeout = 5000
+
+# Read timeout in milliseconds
+read_timeout = 30000
+
+# Write timeout in milliseconds
+write_timeout = 30000
+
+[ssl]
+# Enable SSL connection
+# use_ssl = true
+
+# SSL CA certificate file
+# ssl_ca = /path/to/ca-cert.pem
+
+# SSL client certificate file
+# ssl_cert = /path/to/client-cert.pem
+
+# SSL client key file
+# ssl_key = /path/to/client-key.pem
+
+[cache]
+# Maximum cache size in megabytes
+max_size_mb = 100
+
+# Data cache TTL in seconds
+data_ttl = 30
+
+# Schema cache TTL in seconds
+schema_ttl = 300
+
+# Metadata cache TTL in seconds
+metadata_ttl = 60
+
+# Enable caching (true/false)
+enabled = true
+
+[data]
+# Maximum rows returned in table file reads
+max_rows = 10000
+
+# Rows per page for rows directory
+rows_per_page = 1000
+
+# Pretty-print JSON output
+pretty_json = true
+
+# Include header in CSV output
+include_csv_header = true
+
+# Default file format (csv, json)
+default_format = csv
+
+[security]
+# Mount as read-only (true/false)
+read_only = false
+
+# Comma-separated list of allowed databases (empty = all)
+# allowed_databases = db1,db2,db3
+
+# Comma-separated list of denied databases
+# denied_databases = mysql,information_schema
+
+# Expose system databases like mysql, information_schema, etc.
+expose_system_databases = false
+
+[performance]
+# Connection pool size
+connection_pool_size = 10
+
+# Maximum concurrent queries
+max_concurrent_queries = 20
+
+# Enable query result caching
+enable_query_cache = true
