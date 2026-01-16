@@ -277,6 +277,14 @@ std::string PostgreSQLFormatConverter::buildDelete(const std::string& table,
 }
 
 std::string PostgreSQLFormatConverter::escapeIdentifier(const std::string& identifier) {
+    // Handle schema.table format by escaping each part separately
+    auto dot_pos = identifier.find('.');
+    if (dot_pos != std::string::npos) {
+        std::string schema = identifier.substr(0, dot_pos);
+        std::string table = identifier.substr(dot_pos + 1);
+        return escapeIdentifier(schema) + "." + escapeIdentifier(table);
+    }
+
     // PostgreSQL uses double quotes for identifiers
     std::string result = "\"";
     for (char c : identifier) {

@@ -911,12 +911,12 @@ sql-fuse/
 - [x] Per-category TTL (schema, metadata, data)
 - [x] Pattern-based invalidation
 
-### Phase 5: Write Operations - Complete (SQLite, MySQL)
+### Phase 5: Write Operations - Complete (SQLite, MySQL, PostgreSQL)
 - [x] Single row UPDATE via file write
 - [x] Row DELETE via file unlink
 - [x] Row INSERT via file create
 - [x] Bulk CSV/JSON import
-- [x] Integration tests (SQLite: 40 tests, MySQL: 19 tests)
+- [x] Integration tests (SQLite: 40 tests, MySQL: 33 tests, PostgreSQL: 28 tests)
 
 ### Phase 6: PostgreSQL Backend - Complete
 - [x] PostgreSQL connection pool with libpq

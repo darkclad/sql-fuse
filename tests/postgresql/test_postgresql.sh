@@ -470,6 +470,223 @@ test_data_integrity() {
     fi
 }
 
+# Helper function to run psql commands
+pg_cmd() {
+    PGPASSWORD="$PG_PASSWORD" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" \
+        -t -A -c "$1" 2>/dev/null | tr -d ' '
+}
+
+# Test: Modify row (UPDATE)
+test_modify_row() {
+    log_info "Testing: Modify row"
+
+    # Find database directory
+    DB_DIR=""
+    for dir in "$MOUNT_POINT"/*/; do
+        if [[ -d "${dir}tables" ]]; then
+            DB_DIR="${dir%/}"
+            break
+        fi
+    done
+
+    if [[ -z "$DB_DIR" ]]; then
+        DB_DIR="$MOUNT_POINT/fuse_test"
+    fi
+
+    local row_file="$DB_DIR/tables/users/rows/1.json"
+    if [[ -f "$row_file" ]]; then
+        # Get original value
+        local orig_first_name=$(pg_cmd "SELECT first_name FROM users WHERE id=1")
+
+        # Attempt to modify
+        echo '{"first_name": "Modified"}' > "$row_file" 2>/dev/null || true
+
+        # Verify in database
+        local db_first_name=$(pg_cmd "SELECT first_name FROM users WHERE id=1")
+        if [[ "$db_first_name" == "Modified" ]]; then
+            test_pass "Row modification successful"
+
+            # Restore original
+            pg_cmd "UPDATE users SET first_name='$orig_first_name' WHERE id=1"
+        else
+            log_warn "Row modification may not be supported or failed"
+            ((TESTS_FAILED++)) || true
+        fi
+    else
+        log_warn "Row file not found (skipping modification test)"
+        ((TESTS_FAILED++)) || true
+    fi
+}
+
+# Test: Delete row
+test_delete_row() {
+    log_info "Testing: Delete row"
+
+    # Find database directory
+    DB_DIR=""
+    for dir in "$MOUNT_POINT"/*/; do
+        if [[ -d "${dir}tables" ]]; then
+            DB_DIR="${dir%/}"
+            break
+        fi
+    done
+
+    if [[ -z "$DB_DIR" ]]; then
+        DB_DIR="$MOUNT_POINT/fuse_test"
+    fi
+
+    # Insert a temporary row
+    pg_cmd "INSERT INTO users (id, username, email, password_hash, first_name, last_name, role) VALUES (999, 'temp_user', 'temp@example.com', 'hash', 'Temp', 'User', 'guest')"
+
+    local row_file="$DB_DIR/tables/users/rows/999.json"
+    if [[ -f "$row_file" ]]; then
+        # Attempt to delete
+        rm "$row_file" 2>/dev/null || true
+
+        # Verify in database
+        local count=$(pg_cmd "SELECT COUNT(*) FROM users WHERE id=999")
+        if [[ "$count" == "0" ]]; then
+            test_pass "Row deletion successful"
+        else
+            log_warn "Row deletion may not be supported or failed"
+            ((TESTS_FAILED++)) || true
+            # Clean up
+            pg_cmd "DELETE FROM users WHERE id=999"
+        fi
+    else
+        log_warn "Row file not found (skipping deletion test)"
+        ((TESTS_FAILED++)) || true
+        # Clean up
+        pg_cmd "DELETE FROM users WHERE id=999"
+    fi
+}
+
+# Test: Create row (INSERT)
+test_create_row() {
+    log_info "Testing: Create row"
+
+    # Find database directory
+    DB_DIR=""
+    for dir in "$MOUNT_POINT"/*/; do
+        if [[ -d "${dir}tables" ]]; then
+            DB_DIR="${dir%/}"
+            break
+        fi
+    done
+
+    if [[ -z "$DB_DIR" ]]; then
+        DB_DIR="$MOUNT_POINT/fuse_test"
+    fi
+
+    local rows_dir="$DB_DIR/tables/users/rows"
+    if [[ -d "$rows_dir" ]]; then
+        # Attempt to create new row file
+        local new_row='{"username": "newuser", "email": "new@example.com", "password_hash": "newhash", "first_name": "New", "last_name": "User", "role": "guest"}'
+        echo "$new_row" > "$rows_dir/new.json" 2>/dev/null || true
+
+        # Verify in database
+        local count=$(pg_cmd "SELECT COUNT(*) FROM users WHERE username='newuser'")
+        if [[ "$count" == "1" ]]; then
+            test_pass "Row creation successful"
+            # Clean up
+            pg_cmd "DELETE FROM users WHERE username='newuser'"
+        else
+            log_warn "Row creation may not be supported or failed"
+            ((TESTS_FAILED++)) || true
+        fi
+    else
+        log_warn "Rows directory not found (skipping creation test)"
+        ((TESTS_FAILED++)) || true
+    fi
+}
+
+# Test: Bulk CSV import
+test_bulk_csv_import() {
+    log_info "Testing: Bulk CSV import"
+
+    # Find database directory
+    DB_DIR=""
+    for dir in "$MOUNT_POINT"/*/; do
+        if [[ -d "${dir}tables" ]]; then
+            DB_DIR="${dir%/}"
+            break
+        fi
+    done
+
+    if [[ -z "$DB_DIR" ]]; then
+        DB_DIR="$MOUNT_POINT/fuse_test"
+    fi
+
+    local csv_file="$DB_DIR/tables/users.csv"
+    if [[ -f "$csv_file" ]]; then
+        # Create CSV data with new users
+        local csv_data='"id","username","email","password_hash","first_name","last_name","role","is_active"
+100,"csvuser1","csv1@example.com","hash123","CSV","User1","user",true
+101,"csvuser2","csv2@example.com","hash456","CSV","User2","user",true'
+
+        # Write CSV to table file
+        echo "$csv_data" > "$csv_file" 2>/dev/null || true
+
+        # Verify insertion in database
+        local count=$(pg_cmd "SELECT COUNT(*) FROM users WHERE username IN ('csvuser1', 'csvuser2')")
+        if [[ "$count" == "2" ]]; then
+            test_pass "Bulk CSV import successful"
+            # Clean up
+            pg_cmd "DELETE FROM users WHERE username IN ('csvuser1', 'csvuser2')"
+        else
+            log_warn "Bulk CSV import may not be supported or failed (count=$count)"
+            ((TESTS_FAILED++)) || true
+        fi
+    else
+        log_warn "CSV file not found (skipping bulk import test)"
+        ((TESTS_FAILED++)) || true
+    fi
+}
+
+# Test: Bulk JSON import
+test_bulk_json_import() {
+    log_info "Testing: Bulk JSON import"
+
+    # Find database directory
+    DB_DIR=""
+    for dir in "$MOUNT_POINT"/*/; do
+        if [[ -d "${dir}tables" ]]; then
+            DB_DIR="${dir%/}"
+            break
+        fi
+    done
+
+    if [[ -z "$DB_DIR" ]]; then
+        DB_DIR="$MOUNT_POINT/fuse_test"
+    fi
+
+    local json_file="$DB_DIR/tables/users.json"
+    if [[ -f "$json_file" ]]; then
+        # Create JSON data with new users
+        local json_data='[
+  {"id": 200, "username": "jsonuser1", "email": "json1@example.com", "password_hash": "hash789", "first_name": "JSON", "last_name": "User1", "role": "user", "is_active": true},
+  {"id": 201, "username": "jsonuser2", "email": "json2@example.com", "password_hash": "hash012", "first_name": "JSON", "last_name": "User2", "role": "user", "is_active": true}
+]'
+
+        # Write JSON to table file
+        echo "$json_data" > "$json_file" 2>/dev/null || true
+
+        # Verify insertion in database
+        local count=$(pg_cmd "SELECT COUNT(*) FROM users WHERE username IN ('jsonuser1', 'jsonuser2')")
+        if [[ "$count" == "2" ]]; then
+            test_pass "Bulk JSON import successful"
+            # Clean up
+            pg_cmd "DELETE FROM users WHERE username IN ('jsonuser1', 'jsonuser2')"
+        else
+            log_warn "Bulk JSON import may not be supported or failed (count=$count)"
+            ((TESTS_FAILED++)) || true
+        fi
+    else
+        log_warn "JSON file not found (skipping bulk import test)"
+        ((TESTS_FAILED++)) || true
+    fi
+}
+
 # Main test execution
 main() {
     echo "========================================"
@@ -493,6 +710,13 @@ main() {
     test_views
     test_special_files
     test_data_integrity
+
+    # Write tests
+    test_modify_row
+    test_delete_row
+    test_create_row
+    test_bulk_csv_import
+    test_bulk_json_import
 
     echo ""
     echo "========================================"
