@@ -1,5 +1,7 @@
 # SQL FUSE Filesystem
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 Mount SQL databases as a virtual filesystem using FUSE (Filesystem in Userspace).
 
 **Supported databases:**
@@ -8,6 +10,19 @@ Mount SQL databases as a virtual filesystem using FUSE (Filesystem in Userspace)
 - PostgreSQL
 
 Oracle support planned for future releases.
+
+## Documentation
+
+Comprehensive documentation is available in the [docs/](docs/) directory:
+
+- [Getting Started](docs/getting-started.md) - Installation and basic usage
+- [Configuration](docs/configuration.md) - Configuration options and settings
+- [Filesystem Structure](docs/filesystem-structure.md) - How databases map to files
+- [Supported Databases](docs/supported-databases.md) - Database-specific features
+- [Architecture](docs/architecture.md) - Technical design details
+- [API Reference](docs/api-reference.md) - Internal API documentation
+- [Contributing](docs/contributing.md) - How to contribute
+- [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions
 
 ## Features
 
@@ -599,4 +614,8 @@ sql-fuse/
 
 ## License
 
-MIT License
+SQL-FUSE is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+See [LICENSE](LICENSE) for the full license text.

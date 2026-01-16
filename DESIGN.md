@@ -9,7 +9,7 @@
 ### 1.1 Supported Databases
 - **MySQL/MariaDB** - Full support
 - **SQLite** - Full support
-- **PostgreSQL** - Planned
+- **PostgreSQL** - Full support
 - **Oracle** - Planned
 
 ### 1.2 Goals
@@ -109,30 +109,30 @@
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │              Database Backend Abstraction                  │  │
 │  │  ┌─────────────────────────┐  ┌─────────────────────────┐ │  │
-│  │  │      MySQL Backend      │  │     SQLite Backend      │ │  │
-│  │  │  ┌─────────────────┐    │  │  ┌─────────────────┐    │ │  │
-│  │  │  │MySQLConnection  │    │  │  │SQLiteConnection │    │ │  │
-│  │  │  │Pool             │    │  │  │Pool             │    │ │  │
-│  │  │  ├─────────────────┤    │  │  ├─────────────────┤    │ │  │
-│  │  │  │MySQLSchema      │    │  │  │SQLiteSchema     │    │ │  │
-│  │  │  │Manager          │    │  │  │Manager          │    │ │  │
-│  │  │  ├─────────────────┤    │  │  ├─────────────────┤    │ │  │
-│  │  │  │MySQLVirtualFile │    │  │  │SQLiteVirtualFile│    │ │  │
-│  │  │  ├─────────────────┤    │  │  ├─────────────────┤    │ │  │
-│  │  │  │MySQLFormat      │    │  │  │SQLiteFormat     │    │ │  │
-│  │  │  │Converter        │    │  │  │Converter        │    │ │  │
-│  │  │  └─────────────────┘    │  │  └─────────────────┘    │ │  │
-│  │  └─────────────────────────┘  └─────────────────────────┘ │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+│  │  │   MySQL Backend   │ │  PostgreSQL Backend  │ │   SQLite Backend   │ │  │
+│  │  │  ┌──────────────┐  │ │  ┌──────────────┐    │ │  ┌──────────────┐  │ │  │
+│  │  │  │MySQLConn     │  │ │  │PostgreSQLConn│    │ │  │SQLiteConn    │  │ │  │
+│  │  │  │Pool          │  │ │  │Pool          │    │ │  │Pool          │  │ │  │
+│  │  │  ├──────────────┤  │ │  ├──────────────┤    │ │  ├──────────────┤  │ │  │
+│  │  │  │MySQLSchema   │  │ │  │PostgreSQL    │    │ │  │SQLiteSchema  │  │ │  │
+│  │  │  │Manager       │  │ │  │SchemaManager │    │ │  │Manager       │  │ │  │
+│  │  │  ├──────────────┤  │ │  ├──────────────┤    │ │  ├──────────────┤  │ │  │
+│  │  │  │MySQLVirtFile │  │ │  │PostgreSQLVF  │    │ │  │SQLiteVirtFile│  │ │  │
+│  │  │  ├──────────────┤  │ │  ├──────────────┤    │ │  ├──────────────┤  │ │  │
+│  │  │  │MySQLFormat   │  │ │  │PostgreSQL    │    │ │  │SQLiteFormat  │  │ │  │
+│  │  │  │Converter     │  │ │  │FmtConverter  │    │ │  │Converter     │  │ │  │
+│  │  │  └──────────────┘  │ │  └──────────────┘    │ │  └──────────────┘  │ │  │
+│  │  └────────────────────┘ └──────────────────────┘ └────────────────────┘ │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────────────────────┘
                                 │
-                    ┌───────────┴───────────┐
-                    │                       │
-                    ▼                       ▼
-┌─────────────────────────┐   ┌─────────────────────────┐
-│    MySQL/MariaDB        │   │      SQLite File        │
-│       Server            │   │                         │
-└─────────────────────────┘   └─────────────────────────┘
+            ┌───────────────────┼───────────────────┐
+            │                   │                   │
+            ▼                   ▼                   ▼
+┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
+│   MySQL/MariaDB     │ │    PostgreSQL       │ │    SQLite File      │
+│      Server         │ │       Server        │ │                     │
+└─────────────────────┘ └─────────────────────┘ └─────────────────────┘
 ```
 
 ### 3.2 Abstract Base Classes
@@ -144,7 +144,7 @@ The project uses abstract base classes for database-independent operations:
 enum class DatabaseType {
     MySQL,
     SQLite,
-    PostgreSQL,  // Future
+    PostgreSQL,
     Oracle       // Future
 };
 
@@ -285,7 +285,8 @@ private:
     std::variant<
         std::monostate,
         std::unique_ptr<MySQLConnectionPool>,
-        std::unique_ptr<SQLiteConnectionPool>
+        std::unique_ptr<SQLiteConnectionPool>,
+        std::unique_ptr<PostgreSQLConnectionPool>
     > m_pool;
 
     std::unique_ptr<SchemaManager> m_schema;
@@ -406,18 +407,50 @@ class SQLiteResultSet {
 };
 ```
 
-### 4.3 Database Feature Matrix
+### 4.3 PostgreSQL Backend
+
+```cpp
+class PostgreSQLConnectionPool : public ConnectionPool {
+public:
+    PostgreSQLConnectionPool(const ConnectionConfig& config, size_t poolSize = 5);
+
+    // Acquires a connection from the pool
+    std::unique_ptr<PostgreSQLConnection> acquire();
+    void release(std::unique_ptr<PostgreSQLConnection> conn);
+};
+
+class PostgreSQLSchemaManager : public SchemaManager {
+    // Uses information_schema and pg_catalog
+    // Caches results with configurable TTL
+};
+
+class PostgreSQLVirtualFile : public VirtualFile {
+    // Handles PostgreSQL-specific query generation and result formatting
+};
+
+class PostgreSQLFormatConverter : public FormatConverter {
+    // Converts PGresult to CSV/JSON
+    static std::string toCSV(PGresult* result, const CSVOptions& options);
+    static std::string toJSON(PGresult* result, const JSONOptions& options);
+};
+
+class PostgreSQLResultSet {
+    // Wrapper around PGresult with iterator support
+};
+```
+
+### 4.4 Database Feature Matrix
 
 | Feature | MySQL | SQLite | PostgreSQL | Oracle |
 |---------|-------|--------|------------|--------|
-| Multiple databases | Yes | No (main only) | Yes | Yes |
-| Stored procedures | Yes | No | Yes | Yes |
-| User-defined functions | Yes | No | Yes | Yes |
-| Triggers | Yes | Yes | Yes | Yes |
-| Views | Yes | Yes | Yes | Yes |
-| Foreign keys | Yes | Yes | Yes | Yes |
-| Connection pooling | Yes | Limited | Yes | Yes |
-| SSL/TLS | Yes | N/A | Yes | Yes |
+| Multiple databases | Yes | No (main only) | Yes | Planned |
+| Stored procedures | Yes | No | Yes | Planned |
+| User-defined functions | Yes | No | Yes | Planned |
+| Triggers | Yes | Yes | Yes | Planned |
+| Views | Yes | Yes | Yes | Planned |
+| Foreign keys | Yes | Yes | Yes | Planned |
+| Connection pooling | Yes | Limited | Yes | Planned |
+| SSL/TLS | Yes | N/A | Yes | Planned |
 
 ---
 
@@ -721,7 +754,7 @@ public:
 | libfuse3 | All | FUSE library (version 3.x) |
 | libmysqlclient | MySQL | MySQL C connector |
 | libsqlite3 | SQLite | SQLite3 library |
-| libpq | PostgreSQL | PostgreSQL client (future) |
+| libpq | PostgreSQL | PostgreSQL client library |
 | nlohmann/json | All | JSON parsing (header-only, fetched) |
 | spdlog | All | Logging (fetched) |
 | CLI11 | All | Command-line parsing (header-only, fetched) |
@@ -767,6 +800,13 @@ sql-fuse/
 │   │   ├── MySQLResultSet.hpp
 │   │   ├── MySQLSchemaManager.hpp
 │   │   └── MySQLVirtualFile.hpp
+│   ├── postgresql/
+│   │   ├── PostgreSQLConnection.hpp
+│   │   ├── PostgreSQLConnectionPool.hpp
+│   │   ├── PostgreSQLFormatConverter.hpp
+│   │   ├── PostgreSQLResultSet.hpp
+│   │   ├── PostgreSQLSchemaManager.hpp
+│   │   └── PostgreSQLVirtualFile.hpp
 │   └── sqlite/
 │       ├── SQLiteConnection.hpp
 │       ├── SQLiteConnectionPool.hpp
@@ -792,6 +832,13 @@ sql-fuse/
 │   │   ├── MySQLResultSet.cpp
 │   │   ├── MySQLSchemaManager.cpp
 │   │   └── MySQLVirtualFile.cpp
+│   ├── postgresql/
+│   │   ├── PostgreSQLConnection.cpp
+│   │   ├── PostgreSQLConnectionPool.cpp
+│   │   ├── PostgreSQLFormatConverter.cpp
+│   │   ├── PostgreSQLResultSet.cpp
+│   │   ├── PostgreSQLSchemaManager.cpp
+│   │   └── PostgreSQLVirtualFile.cpp
 │   └── sqlite/
 │       ├── SQLiteConnection.cpp
 │       ├── SQLiteConnectionPool.cpp
@@ -799,6 +846,16 @@ sql-fuse/
 │       ├── SQLiteResultSet.cpp
 │       ├── SQLiteSchemaManager.cpp
 │       └── SQLiteVirtualFile.cpp
+├── docs/
+│   ├── index.md
+│   ├── getting-started.md
+│   ├── configuration.md
+│   ├── filesystem-structure.md
+│   ├── supported-databases.md
+│   ├── architecture.md
+│   ├── api-reference.md
+│   ├── contributing.md
+│   └── troubleshooting.md
 └── tests/
     ├── CMakeLists.txt
     ├── test_main.cpp
@@ -811,6 +868,10 @@ sql-fuse/
     │   ├── setup_test_db.sh
     │   ├── teardown_test_db.sh
     │   └── test_mysql.sh            # Integration tests
+    ├── postgresql/
+    │   ├── setup_test_db.sql
+    │   ├── teardown_test_db.sql
+    │   └── test_postgresql.sh       # Integration tests
     └── sqlite/
         ├── setup_test_db.sh
         ├── setup_test_db.sql
@@ -856,11 +917,19 @@ sql-fuse/
 - [ ] Row INSERT via file create
 - [ ] Bulk CSV import
 
-### Phase 6: Additional Backends - Future
-- [ ] PostgreSQL backend
+### Phase 6: PostgreSQL Backend - Complete
+- [x] PostgreSQL connection pool with libpq
+- [x] PostgreSQL schema manager with information_schema
+- [x] Database and table listing
+- [x] Table data as CSV/JSON
+- [x] CREATE statement files (.sql)
+- [x] Views, functions, procedures, triggers support
+- [x] Integration tests (23 tests passing)
+
+### Phase 8: Additional Backends - Future
 - [ ] Oracle backend
 
-### Phase 7: Polish - Ongoing
+### Phase 9: Polish - Ongoing
 - [x] Basic error handling
 - [ ] Comprehensive error recovery
 - [ ] Performance optimization
@@ -897,6 +966,38 @@ cat /mnt/mysql/mydb/tables/users/.schema
 fusermount -u /mnt/mysql
 ```
 
+### PostgreSQL
+
+```bash
+# Mount PostgreSQL database
+sql-fuse -t postgresql -H localhost -u myuser -D mydb /mnt/postgres
+
+# Or use environment variable for password
+PGPASSWORD=secret sql-fuse -t postgresql -H localhost -u myuser /mnt/postgres
+
+# List databases
+ls /mnt/postgres
+# Output: mydb  testdb  template1
+
+# List tables
+ls /mnt/postgres/mydb/tables
+# Output: users.csv  users.json  users.sql  users/  orders.csv  ...
+
+# Read table as CSV
+cat /mnt/postgres/mydb/tables/users.csv
+
+# View stored procedures
+ls /mnt/postgres/mydb/procedures
+# Output: process_order.sql  validate_user.sql
+
+# View functions
+ls /mnt/postgres/mydb/functions
+# Output: calculate_total.sql  get_user_name.sql
+
+# Unmount
+fusermount -u /mnt/postgres
+```
+
 ### SQLite
 
 ```bash
@@ -922,7 +1023,7 @@ fusermount -u /mnt/sqlite
 
 ## 12. Future Enhancements
 
-- **PostgreSQL/Oracle backends**: Additional database support
+- **Oracle backend**: Additional database support
 - **Query interface**: Special file to execute arbitrary SQL
 - **Watch mode**: inotify-like notifications for data changes
 - **Compression**: On-the-fly compression for large results
