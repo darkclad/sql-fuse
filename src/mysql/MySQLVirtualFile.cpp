@@ -306,14 +306,40 @@ int MySQLVirtualFile::handleRowWrite() {
 
         RowData row = FormatConverter::parseJSONRow(m_writeBuffer);
 
-        std::string sql = MySQLFormatConverter::buildUpdate(
-            m_path.database + "." + m_path.object_name,
-            row,
-            table_info->primaryKeyColumn,
-            m_path.row_id,
-            true);
-
         auto conn = pool->acquire();
+
+        // Check if row exists (by checking if row_id is numeric and exists)
+        bool rowExists = false;
+        bool isNumericId = !m_path.row_id.empty() &&
+                          m_path.row_id.find_first_not_of("0123456789") == std::string::npos;
+
+        if (isNumericId) {
+            std::string checkSql = "SELECT 1 FROM `" + m_path.database + "`.`" + m_path.object_name +
+                                   "` WHERE `" + table_info->primaryKeyColumn + "` = '" +
+                                   MySQLFormatConverter::escapeSQL(m_path.row_id) + "' LIMIT 1";
+            if (conn->query(checkSql)) {
+                MySQLResultSet result(conn->storeResult());
+                rowExists = (result.fetchRow() != nullptr);
+            }
+        }
+
+        std::string sql;
+
+        if (rowExists) {
+            // UPDATE existing row
+            sql = MySQLFormatConverter::buildUpdate(
+                m_path.database + "." + m_path.object_name,
+                row,
+                table_info->primaryKeyColumn,
+                m_path.row_id,
+                true);
+        } else {
+            // INSERT new row
+            sql = MySQLFormatConverter::buildInsert(
+                m_path.database + "." + m_path.object_name,
+                row,
+                true);
+        }
 
         if (!conn->query(sql)) {
             m_lastError = conn->error();

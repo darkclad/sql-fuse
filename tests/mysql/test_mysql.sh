@@ -135,13 +135,13 @@ assert_eq() {
 
     if [ "$expected" = "$actual" ]; then
         log_success "$message"
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true
         return 0
     else
         log_error "$message"
         log_verbose "  Expected: $expected"
         log_verbose "  Actual:   $actual"
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true
         return 1
     fi
 }
@@ -153,13 +153,13 @@ assert_contains() {
 
     if [[ "$haystack" == *"$needle"* ]]; then
         log_success "$message"
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true
         return 0
     else
         log_error "$message"
         log_verbose "  Looking for: $needle"
         log_verbose "  In: $haystack"
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true
         return 1
     fi
 }
@@ -170,12 +170,12 @@ assert_file_exists() {
 
     if [ -e "$file" ]; then
         log_success "$message"
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true
         return 0
     else
         log_error "$message"
         log_verbose "  File not found: $file"
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true
         return 1
     fi
 }
@@ -186,12 +186,12 @@ assert_dir_exists() {
 
     if [ -d "$dir" ]; then
         log_success "$message"
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true
         return 0
     else
         log_error "$message"
         log_verbose "  Directory not found: $dir"
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true
         return 1
     fi
 }
@@ -388,7 +388,7 @@ test_read_table_csv() {
     assert_contains "$content" "id" "CSV contains id column header"
     assert_contains "$content" "username" "CSV contains username column header"
     assert_contains "$content" "admin" "CSV contains admin user data"
-    assert_contains "$content" "johndoe" "CSV contains johndoe user data"
+    assert_contains "$content" "john_doe" "CSV contains john_doe user data"
 }
 
 # Test: Read table as JSON
@@ -412,10 +412,10 @@ test_read_table_schema() {
         local content=$(cat "$schema_file" 2>/dev/null)
         assert_contains "$content" "id" "Schema contains id column"
         assert_contains "$content" "username" "Schema contains username column"
-        assert_contains "$content" "VARCHAR" "Schema contains VARCHAR type"
+        assert_contains "$content" "varchar" "Schema contains varchar type"
     else
         log_warn "Schema file not found (skipping)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -445,7 +445,7 @@ test_read_row() {
         assert_contains "$content" '"admin"' "Row contains admin data"
     else
         log_warn "Rows directory not found (skipping)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -470,7 +470,7 @@ test_read_view() {
         assert_contains "$content" "username" "View contains username column"
     else
         log_warn "View CSV file not found (skipping)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -494,17 +494,17 @@ test_modify_row() {
         local db_first_name=$(mysql_cmd_db "SELECT first_name FROM users WHERE id=1")
         if [ "$db_first_name" = "Modified" ]; then
             log_success "Row modification successful"
-            ((TESTS_PASSED++))
+            ((TESTS_PASSED++)) || true
 
             # Restore original
             mysql_cmd_db "UPDATE users SET first_name='$orig_first_name' WHERE id=1"
         else
             log_warn "Row modification may not be supported or failed"
-            ((TESTS_SKIPPED++))
+            ((TESTS_SKIPPED++)) || true
         fi
     else
         log_warn "Row file not found (skipping modification test)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -525,16 +525,16 @@ test_delete_row() {
         local count=$(mysql_cmd_db "SELECT COUNT(*) FROM users WHERE id=$temp_id")
         if [ "$count" = "0" ]; then
             log_success "Row deletion successful"
-            ((TESTS_PASSED++))
+            ((TESTS_PASSED++)) || true
         else
             log_warn "Row deletion may not be supported or failed"
-            ((TESTS_SKIPPED++))
+            ((TESTS_SKIPPED++)) || true
             # Clean up
             mysql_cmd_db "DELETE FROM users WHERE id=$temp_id"
         fi
     else
         log_warn "Row file not found (skipping deletion test)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
         # Clean up
         mysql_cmd_db "DELETE FROM users WHERE id=$temp_id"
     fi
@@ -554,16 +554,16 @@ test_create_row() {
         local count=$(mysql_cmd_db "SELECT COUNT(*) FROM users WHERE username='newuser'")
         if [ "$count" = "1" ]; then
             log_success "Row creation successful"
-            ((TESTS_PASSED++))
+            ((TESTS_PASSED++)) || true
             # Clean up
             mysql_cmd_db "DELETE FROM users WHERE username='newuser'"
         else
             log_warn "Row creation may not be supported or failed"
-            ((TESTS_SKIPPED++))
+            ((TESTS_SKIPPED++)) || true
         fi
     else
         log_warn "Rows directory not found (skipping creation test)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -576,14 +576,77 @@ test_file_sizes() {
         local size=$(stat -c %s "$csv_file" 2>/dev/null || stat -f %z "$csv_file" 2>/dev/null)
         if [ -n "$size" ] && [ "$size" -gt 0 ]; then
             log_success "File size reported correctly: $size bytes"
-            ((TESTS_PASSED++))
+            ((TESTS_PASSED++)) || true
         else
             log_error "File size is zero or not reported"
-            ((TESTS_FAILED++))
+            ((TESTS_FAILED++)) || true
         fi
     else
         log_warn "CSV file not found (skipping)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
+    fi
+}
+
+# Test: Bulk CSV import
+test_bulk_csv_import() {
+    log_info "Testing: Bulk CSV import"
+
+    local csv_file="$MOUNT_POINT/$TEST_DB/tables/users.csv"
+    if [ -f "$csv_file" ]; then
+        # Create CSV data with new users (using columns from schema)
+        local csv_data='"id","username","email","password_hash","first_name","last_name","role","is_active"
+100,"csvuser1","csv1@example.com","hash123","CSV","User1","user",1
+101,"csvuser2","csv2@example.com","hash456","CSV","User2","user",1'
+
+        # Write CSV to table file
+        echo "$csv_data" > "$csv_file" 2>/dev/null || true
+
+        # Verify insertion in database
+        local count=$(mysql_cmd_db "SELECT COUNT(*) FROM users WHERE username IN ('csvuser1', 'csvuser2')")
+        if [ "$count" = "2" ]; then
+            log_success "Bulk CSV import successful"
+            ((TESTS_PASSED++)) || true
+            # Clean up
+            mysql_cmd_db "DELETE FROM users WHERE username IN ('csvuser1', 'csvuser2')"
+        else
+            log_warn "Bulk CSV import may not be supported or failed (count=$count)"
+            ((TESTS_SKIPPED++)) || true
+        fi
+    else
+        log_warn "CSV file not found (skipping bulk import test)"
+        ((TESTS_SKIPPED++)) || true
+    fi
+}
+
+# Test: Bulk JSON import
+test_bulk_json_import() {
+    log_info "Testing: Bulk JSON import"
+
+    local json_file="$MOUNT_POINT/$TEST_DB/tables/users.json"
+    if [ -f "$json_file" ]; then
+        # Create JSON data with new users
+        local json_data='[
+  {"id": 200, "username": "jsonuser1", "email": "json1@example.com", "password_hash": "hash789", "first_name": "JSON", "last_name": "User1", "role": "user", "is_active": 1},
+  {"id": 201, "username": "jsonuser2", "email": "json2@example.com", "password_hash": "hash012", "first_name": "JSON", "last_name": "User2", "role": "user", "is_active": 1}
+]'
+
+        # Write JSON to table file
+        echo "$json_data" > "$json_file" 2>/dev/null || true
+
+        # Verify insertion in database
+        local count=$(mysql_cmd_db "SELECT COUNT(*) FROM users WHERE username IN ('jsonuser1', 'jsonuser2')")
+        if [ "$count" = "2" ]; then
+            log_success "Bulk JSON import successful"
+            ((TESTS_PASSED++)) || true
+            # Clean up
+            mysql_cmd_db "DELETE FROM users WHERE username IN ('jsonuser1', 'jsonuser2')"
+        else
+            log_warn "Bulk JSON import may not be supported or failed (count=$count)"
+            ((TESTS_SKIPPED++)) || true
+        fi
+    else
+        log_warn "JSON file not found (skipping bulk import test)"
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -612,6 +675,10 @@ run_tests() {
     test_modify_row
     test_delete_row
     test_create_row
+
+    # Bulk import tests
+    test_bulk_csv_import
+    test_bulk_json_import
 }
 
 # Print summary

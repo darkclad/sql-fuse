@@ -245,6 +245,14 @@ std::string MySQLFormatConverter::buildDelete(const std::string& table,
 }
 
 std::string MySQLFormatConverter::escapeIdentifier(const std::string& identifier) {
+    // Handle database.table format by escaping each part separately
+    auto dot_pos = identifier.find('.');
+    if (dot_pos != std::string::npos) {
+        std::string db = identifier.substr(0, dot_pos);
+        std::string table = identifier.substr(dot_pos + 1);
+        return escapeIdentifier(db) + "." + escapeIdentifier(table);
+    }
+
     std::string result = "`";
     for (char c : identifier) {
         if (c == '`') {
