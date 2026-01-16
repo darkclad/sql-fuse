@@ -1,3 +1,18 @@
+/**
+ * @file SQLiteVirtualFile.cpp
+ * @brief Implementation of SQLite-specific virtual file operations.
+ *
+ * Implements the SQLiteVirtualFile class which generates file content
+ * (CSV, JSON, SQL) from SQLite database objects and handles write operations
+ * (INSERT, UPDATE) through the FUSE filesystem interface.
+ *
+ * SQLite-Specific Notes:
+ * - Uses rowid as fallback when no primary key is defined
+ * - INSERT OR REPLACE used for upsert semantics
+ * - Double-quote identifier escaping (standard SQL)
+ * - Doubled single-quote string escaping
+ */
+
 #include "SQLiteVirtualFile.hpp"
 #include "SQLiteResultSet.hpp"
 #include "SQLiteFormatConverter.hpp"
@@ -9,6 +24,10 @@
 
 namespace sqlfuse {
 
+// ============================================================================
+// Construction
+// ============================================================================
+
 SQLiteVirtualFile::SQLiteVirtualFile(const ParsedPath& path,
                                      SchemaManager& schema,
                                      CacheManager& cache,
@@ -19,6 +38,10 @@ SQLiteVirtualFile::SQLiteVirtualFile(const ParsedPath& path,
 SQLiteConnectionPool* SQLiteVirtualFile::getPool() {
     return dynamic_cast<SQLiteConnectionPool*>(&m_schema.connectionPool());
 }
+
+// ============================================================================
+// Content Generation - Tables
+// ============================================================================
 
 std::string SQLiteVirtualFile::generateTableCSV() {
     auto* pool = getPool();
@@ -127,6 +150,10 @@ std::string SQLiteVirtualFile::generateTableJSON() {
     return arr.dump() + "\n";
 }
 
+// ============================================================================
+// Content Generation - Individual Rows
+// ============================================================================
+
 std::string SQLiteVirtualFile::generateRowJSON() {
     auto* pool = getPool();
     if (!pool) {
@@ -173,6 +200,10 @@ std::string SQLiteVirtualFile::generateRowJSON() {
     }
     return row.dump() + "\n";
 }
+
+// ============================================================================
+// Content Generation - Views
+// ============================================================================
 
 std::string SQLiteVirtualFile::generateViewContent() {
     if (m_path.format == FileFormat::SQL) {
@@ -251,6 +282,10 @@ std::string SQLiteVirtualFile::generateViewContent() {
     }
 }
 
+// ============================================================================
+// Content Generation - Database and User Info
+// ============================================================================
+
 std::string SQLiteVirtualFile::generateDatabaseInfo() {
     std::ostringstream out;
 
@@ -286,6 +321,10 @@ std::string SQLiteVirtualFile::generateUserInfo() {
     // SQLite doesn't have user management
     return "User management is not available in SQLite\n";
 }
+
+// ============================================================================
+// Write Operations
+// ============================================================================
 
 int SQLiteVirtualFile::handleTableWrite() {
     if (m_writeBuffer.empty()) {

@@ -1,7 +1,26 @@
+/**
+ * @file SQLiteFormatConverter.cpp
+ * @brief Implementation of SQLite-specific SQL statement generation utilities.
+ *
+ * Implements the SQLiteFormatConverter class which provides static methods
+ * for building INSERT, UPDATE, and DELETE SQL statements with proper escaping
+ * for SQLite databases.
+ *
+ * SQLite Escaping Conventions:
+ * - Identifiers: Double quotes with doubled double-quotes for escaping
+ *   (e.g., "column""name" for a column containing a double quote)
+ * - Strings: Single quotes with doubled single-quotes for escaping
+ *   (e.g., 'O''Brien' for the string O'Brien)
+ */
+
 #include "SQLiteFormatConverter.hpp"
 #include <sstream>
 
 namespace sqlfuse {
+
+// ============================================================================
+// SQL Statement Builders
+// ============================================================================
 
 std::string SQLiteFormatConverter::buildInsert(const std::string& table,
                                                 const RowData& row,
@@ -102,6 +121,10 @@ std::string SQLiteFormatConverter::buildDelete(const std::string& table,
 
     return sql.str();
 }
+
+// ============================================================================
+// Escaping Utilities
+// ============================================================================
 
 std::string SQLiteFormatConverter::escapeIdentifier(const std::string& identifier) {
     // SQLite uses double quotes for identifiers

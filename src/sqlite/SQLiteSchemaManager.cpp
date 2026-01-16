@@ -1,3 +1,24 @@
+/**
+ * @file SQLiteSchemaManager.cpp
+ * @brief Implementation of SQLite-specific database schema manager.
+ *
+ * Implements the SQLiteSchemaManager class which queries SQLite's system tables
+ * and PRAGMA commands to provide metadata about database objects.
+ *
+ * SQLite Metadata Sources:
+ * - sqlite_master: System table with object definitions (tables, views, indexes, triggers)
+ * - PRAGMA table_info(): Column definitions for tables
+ * - PRAGMA index_list()/index_info(): Index information
+ * - PRAGMA database_list: Attached databases
+ * - PRAGMA compile_options: SQLite compile-time options
+ *
+ * SQLite Characteristics:
+ * - Single database per file with optional attached databases
+ * - No stored procedures or functions (only C extensions)
+ * - No user management (file permissions only)
+ * - Uses rowid as implicit primary key for most tables
+ */
+
 #include "SQLiteSchemaManager.hpp"
 #include "CacheManager.hpp"
 #include <spdlog/spdlog.h>
@@ -7,12 +28,19 @@
 
 namespace sqlfuse {
 
-// SQLiteSchemaManager implementation
+// ============================================================================
+// Construction
+// ============================================================================
+
 SQLiteSchemaManager::SQLiteSchemaManager(SQLiteConnectionPool& pool, CacheManager& cache)
     : m_pool(pool), m_cache(cache) {
     // Database name is derived from the connection - we'll use "main" as SQLite's default
     m_databaseName = "main";
 }
+
+// ============================================================================
+// Escaping Utilities
+// ============================================================================
 
 std::string SQLiteSchemaManager::escapeIdentifier(const std::string& id) const {
     // SQLite uses double quotes for identifiers
@@ -34,6 +62,10 @@ std::string SQLiteSchemaManager::escapeString(const std::string& str) const {
     }
     return result;
 }
+
+// ============================================================================
+// Database Operations
+// ============================================================================
 
 std::vector<std::string> SQLiteSchemaManager::getDatabases() {
     // SQLite has a single "main" database per file, plus any attached databases
@@ -61,6 +93,10 @@ bool SQLiteSchemaManager::databaseExists(const std::string& database) {
     auto databases = getDatabases();
     return std::find(databases.begin(), databases.end(), database) != databases.end();
 }
+
+// ============================================================================
+// Table Operations
+// ============================================================================
 
 std::vector<std::string> SQLiteSchemaManager::getTables(const std::string& database) {
     std::string cache_key = CacheManager::makeKey(database, "tables");
@@ -220,6 +256,10 @@ std::optional<TableInfo> SQLiteSchemaManager::getTableInfo(const std::string& da
     return info;
 }
 
+// ============================================================================
+// View Operations
+// ============================================================================
+
 std::vector<std::string> SQLiteSchemaManager::getViews(const std::string& database) {
     std::string cache_key = CacheManager::makeKey(database, "views");
 
@@ -279,6 +319,10 @@ std::optional<ViewInfo> SQLiteSchemaManager::getViewInfo(const std::string& data
     return info;
 }
 
+// ============================================================================
+// Routine Operations (Not Supported by SQLite)
+// ============================================================================
+
 std::vector<std::string> SQLiteSchemaManager::getProcedures(const std::string& /*database*/) {
     // SQLite doesn't have stored procedures
     return {};
@@ -295,6 +339,10 @@ std::optional<RoutineInfo> SQLiteSchemaManager::getRoutineInfo(const std::string
     // SQLite doesn't have stored routines
     return std::nullopt;
 }
+
+// ============================================================================
+// Trigger Operations
+// ============================================================================
 
 std::vector<std::string> SQLiteSchemaManager::getTriggers(const std::string& database) {
     std::vector<std::string> triggers;
@@ -350,6 +398,10 @@ std::optional<TriggerInfo> SQLiteSchemaManager::getTriggerInfo(const std::string
     return info;
 }
 
+// ============================================================================
+// DDL Statements
+// ============================================================================
+
 std::string SQLiteSchemaManager::getCreateStatement(const std::string& database,
                                                      const std::string& object,
                                                      const std::string& type) {
@@ -378,6 +430,10 @@ std::string SQLiteSchemaManager::getCreateStatement(const std::string& database,
     return "";
 }
 
+// ============================================================================
+// Server Information
+// ============================================================================
+
 ServerInfo SQLiteSchemaManager::getServerInfo() {
     ServerInfo info;
 
@@ -390,9 +446,13 @@ ServerInfo SQLiteSchemaManager::getServerInfo() {
 }
 
 std::vector<UserInfo> SQLiteSchemaManager::getUsers() {
-    // SQLite doesn't have users
+    // SQLite doesn't have users - security is file-based
     return {};
 }
+
+// ============================================================================
+// Configuration Variables
+// ============================================================================
 
 std::unordered_map<std::string, std::string> SQLiteSchemaManager::getGlobalVariables() {
     std::unordered_map<std::string, std::string> vars;
@@ -432,6 +492,10 @@ std::unordered_map<std::string, std::string> SQLiteSchemaManager::getSessionVari
     // SQLite doesn't distinguish between global and session variables
     return getGlobalVariables();
 }
+
+// ============================================================================
+// Row Operations
+// ============================================================================
 
 std::vector<std::string> SQLiteSchemaManager::getRowIds(const std::string& database,
                                                          const std::string& table,
@@ -479,6 +543,10 @@ uint64_t SQLiteSchemaManager::getRowCount(const std::string& database, const std
 
     return 0;
 }
+
+// ============================================================================
+// Cache Invalidation
+// ============================================================================
 
 void SQLiteSchemaManager::invalidateTable(const std::string& database, const std::string& table) {
     m_cache.invalidateTable(database, table);

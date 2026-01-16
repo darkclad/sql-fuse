@@ -1,3 +1,13 @@
+/**
+ * @file SQLiteConnectionPool.cpp
+ * @brief Implementation of SQLite connection pool.
+ *
+ * Implements the SQLiteConnectionPool class which manages a pool of SQLite
+ * connections for efficient reuse. Note that SQLite's file-based architecture
+ * and internal locking make connection pooling simpler than client-server
+ * databases, but pooling still reduces overhead from repeated file opens.
+ */
+
 #include "SQLiteConnectionPool.hpp"
 #include "SQLiteVirtualFile.hpp"
 #include <spdlog/spdlog.h>
@@ -5,9 +15,13 @@
 
 namespace sqlfuse {
 
+// ============================================================================
+// Construction and Destruction
+// ============================================================================
+
 SQLiteConnectionPool::SQLiteConnectionPool(const std::string& dbPath, size_t poolSize)
     : m_dbPath(dbPath), m_poolSize(poolSize) {
-    // Pre-create some connections
+    // Pre-create some connections to reduce initial latency
     for (size_t i = 0; i < std::min(poolSize, size_t(3)); ++i) {
         auto conn = std::make_unique<SQLiteConnection>(dbPath);
         if (conn->isValid()) {
@@ -21,6 +35,10 @@ SQLiteConnectionPool::SQLiteConnectionPool(const std::string& dbPath, size_t poo
 SQLiteConnectionPool::~SQLiteConnectionPool() {
     drain();
 }
+
+// ============================================================================
+// Connection Acquisition and Release
+// ============================================================================
 
 std::unique_ptr<SQLiteConnection> SQLiteConnectionPool::acquire() {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -40,7 +58,7 @@ std::unique_ptr<SQLiteConnection> SQLiteConnectionPool::acquire() {
         }
     }
 
-    // Pool exhausted, create anyway (SQLite handles this via locking)
+    // Pool exhausted, create anyway (SQLite handles concurrency via file locking)
     return std::make_unique<SQLiteConnection>(m_dbPath);
 }
 
@@ -51,8 +69,12 @@ void SQLiteConnectionPool::release(std::unique_ptr<SQLiteConnection> conn) {
     if (m_available.size() < m_poolSize) {
         m_available.push_back(std::move(conn));
     }
-    // Otherwise let it be destroyed
+    // Otherwise let it be destroyed (pool is full)
 }
+
+// ============================================================================
+// Pool Statistics and Management
+// ============================================================================
 
 bool SQLiteConnectionPool::healthCheck() {
     auto conn = acquire();
@@ -83,6 +105,10 @@ size_t SQLiteConnectionPool::availableCount() const {
 size_t SQLiteConnectionPool::totalCount() const {
     return m_createdCount;
 }
+
+// ============================================================================
+// Virtual File Factory
+// ============================================================================
 
 std::unique_ptr<VirtualFile> SQLiteConnectionPool::createVirtualFile(
     const ParsedPath& path,
