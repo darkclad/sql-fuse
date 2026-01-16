@@ -1,3 +1,27 @@
+/**
+ * @file PostgreSQLSchemaManager.cpp
+ * @brief Implementation of PostgreSQL-specific database schema manager.
+ *
+ * Implements the PostgreSQLSchemaManager class which queries PostgreSQL's system
+ * catalogs (pg_catalog) and information_schema to provide metadata about database
+ * objects including tables, views, functions, procedures, and triggers.
+ *
+ * PostgreSQL System Catalogs Used:
+ * - pg_database: Database list
+ * - pg_class: Tables, views, indexes, sequences
+ * - pg_namespace: Schemas (namespaces)
+ * - pg_index: Index definitions
+ * - pg_proc: Functions and procedures
+ * - pg_user: User information
+ * - information_schema.*: SQL-standard metadata views
+ *
+ * PostgreSQL-Specific Features:
+ * - Schemas (namespaces) for organizing objects within a database
+ * - Rich function support (FUNCTION, PROCEDURE, AGGREGATE)
+ * - CTID as system row identifier
+ * - Dollar-quoted strings for procedure bodies
+ */
+
 #include "PostgreSQLSchemaManager.hpp"
 #include "PostgreSQLResultSet.hpp"
 #include "ErrorHandler.hpp"
@@ -7,9 +31,17 @@
 
 namespace sqlfuse {
 
+// ============================================================================
+// Construction
+// ============================================================================
+
 PostgreSQLSchemaManager::PostgreSQLSchemaManager(PostgreSQLConnectionPool& pool, CacheManager& cache)
     : m_pool(pool), m_cache(cache) {
 }
+
+// ============================================================================
+// Escaping Utilities
+// ============================================================================
 
 std::string PostgreSQLSchemaManager::escapeIdentifier(const std::string& id) const {
     // PostgreSQL uses double quotes for identifiers
@@ -31,6 +63,10 @@ std::string PostgreSQLSchemaManager::escapeString(const std::string& str) const 
     }
     return result;
 }
+
+// ============================================================================
+// Database Operations
+// ============================================================================
 
 std::vector<std::string> PostgreSQLSchemaManager::getDatabases() {
     std::string cache_key = "databases";
@@ -100,6 +136,10 @@ std::vector<std::string> PostgreSQLSchemaManager::getSchemas(const std::string& 
 
     return schemas;
 }
+
+// ============================================================================
+// Table Operations
+// ============================================================================
 
 std::vector<std::string> PostgreSQLSchemaManager::getTables(const std::string& database) {
     std::string cache_key = CacheManager::makeKey(database, "tables");
@@ -319,6 +359,10 @@ std::optional<TableInfo> PostgreSQLSchemaManager::getTableInfo(const std::string
     return info;
 }
 
+// ============================================================================
+// View Operations
+// ============================================================================
+
 std::vector<std::string> PostgreSQLSchemaManager::getViews(const std::string& database) {
     std::string cache_key = CacheManager::makeKey(database, "views");
 
@@ -384,6 +428,10 @@ std::optional<ViewInfo> PostgreSQLSchemaManager::getViewInfo(const std::string& 
 
     return info;
 }
+
+// ============================================================================
+// Routine Operations (Procedures and Functions)
+// ============================================================================
 
 std::vector<std::string> PostgreSQLSchemaManager::getProcedures(const std::string& database) {
     std::vector<std::string> procedures;
@@ -464,6 +512,10 @@ std::optional<RoutineInfo> PostgreSQLSchemaManager::getRoutineInfo(const std::st
     return info;
 }
 
+// ============================================================================
+// Trigger Operations
+// ============================================================================
+
 std::vector<std::string> PostgreSQLSchemaManager::getTriggers(const std::string& database) {
     std::vector<std::string> triggers;
 
@@ -514,6 +566,10 @@ std::optional<TriggerInfo> PostgreSQLSchemaManager::getTriggerInfo(const std::st
     return info;
 }
 
+// ============================================================================
+// DDL Statement Generation
+// ============================================================================
+
 std::string PostgreSQLSchemaManager::getCreateStatement(const std::string& database,
                                                           const std::string& object,
                                                           const std::string& type) {
@@ -558,6 +614,10 @@ std::string PostgreSQLSchemaManager::getCreateStatement(const std::string& datab
     const char* stmt = result.getField(0);
     return stmt ? stmt : "";
 }
+
+// ============================================================================
+// Server Information
+// ============================================================================
 
 ServerInfo PostgreSQLSchemaManager::getServerInfo() {
     ServerInfo info;
@@ -616,6 +676,10 @@ std::vector<UserInfo> PostgreSQLSchemaManager::getUsers() {
     return users;
 }
 
+// ============================================================================
+// Server Variables
+// ============================================================================
+
 std::unordered_map<std::string, std::string> PostgreSQLSchemaManager::getGlobalVariables() {
     std::unordered_map<std::string, std::string> vars;
 
@@ -641,6 +705,10 @@ std::unordered_map<std::string, std::string> PostgreSQLSchemaManager::getSession
     // In PostgreSQL, session variables are the same as SHOW ALL for current session
     return getGlobalVariables();
 }
+
+// ============================================================================
+// Row Operations
+// ============================================================================
 
 std::vector<std::string> PostgreSQLSchemaManager::getRowIds(const std::string& database,
                                                               const std::string& table,
@@ -692,6 +760,10 @@ uint64_t PostgreSQLSchemaManager::getRowCount(const std::string& database, const
 
     return 0;
 }
+
+// ============================================================================
+// Cache Invalidation
+// ============================================================================
 
 void PostgreSQLSchemaManager::invalidateTable(const std::string& database, const std::string& table) {
     m_cache.invalidateTable(database, table);

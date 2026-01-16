@@ -1,3 +1,12 @@
+/**
+ * @file PostgreSQLConnectionPool.cpp
+ * @brief Implementation of thread-safe PostgreSQL connection pool.
+ *
+ * Implements the PostgreSQLConnectionPool class which manages a pool of PostgreSQL
+ * connections for efficient reuse across concurrent operations. Uses libpq
+ * connection strings for configuration and supports SSL connections.
+ */
+
 #include "PostgreSQLConnectionPool.hpp"
 #include "PostgreSQLVirtualFile.hpp"
 #include "ErrorHandler.hpp"
@@ -7,10 +16,14 @@
 
 namespace sqlfuse {
 
+// ============================================================================
+// Construction and Destruction
+// ============================================================================
+
 PostgreSQLConnectionPool::PostgreSQLConnectionPool(const ConnectionConfig& config, size_t poolSize)
     : m_config(config), m_poolSize(poolSize) {
 
-    // Pre-create some connections
+    // Pre-create some connections to reduce initial latency
     size_t initialCount = std::min(poolSize / 2, size_t(3));
     for (size_t i = 0; i < initialCount; ++i) {
         try {
@@ -30,6 +43,10 @@ PostgreSQLConnectionPool::PostgreSQLConnectionPool(const ConnectionConfig& confi
 PostgreSQLConnectionPool::~PostgreSQLConnectionPool() {
     drain();
 }
+
+// ============================================================================
+// Connection Creation and Validation
+// ============================================================================
 
 PGconn* PostgreSQLConnectionPool::createConnection() {
     // Build connection string
@@ -92,6 +109,10 @@ PGconn* PostgreSQLConnectionPool::createConnection() {
 
     return conn;
 }
+
+// ============================================================================
+// Connection Acquisition
+// ============================================================================
 
 std::unique_ptr<PostgreSQLConnection> PostgreSQLConnectionPool::acquire(std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(m_mutex);
@@ -159,6 +180,10 @@ std::unique_ptr<PostgreSQLConnection> PostgreSQLConnectionPool::tryAcquire() {
     return std::make_unique<PostgreSQLConnection>(this, conn);
 }
 
+// ============================================================================
+// Connection Release
+// ============================================================================
+
 void PostgreSQLConnectionPool::releaseConnection(PGconn* conn) {
     if (!conn) return;
 
@@ -202,6 +227,10 @@ bool PostgreSQLConnectionPool::validateConnection(PGconn* conn) {
     return ok;
 }
 
+// ============================================================================
+// Pool Statistics and Management
+// ============================================================================
+
 size_t PostgreSQLConnectionPool::availableCount() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_available.size();
@@ -240,6 +269,10 @@ void PostgreSQLConnectionPool::drain() {
     m_cv.notify_all();
     spdlog::info("PostgreSQL connection pool drained");
 }
+
+// ============================================================================
+// Virtual File Factory
+// ============================================================================
 
 std::unique_ptr<VirtualFile> PostgreSQLConnectionPool::createVirtualFile(
     const ParsedPath& path,

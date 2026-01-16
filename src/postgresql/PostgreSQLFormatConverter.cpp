@@ -1,7 +1,29 @@
+/**
+ * @file PostgreSQLFormatConverter.cpp
+ * @brief Implementation of PostgreSQL-specific data format conversion utilities.
+ *
+ * Implements the PostgreSQLFormatConverter class which provides static methods
+ * for converting PostgreSQL query results to CSV/JSON formats and for building
+ * INSERT, UPDATE, DELETE SQL statements with proper escaping.
+ *
+ * PostgreSQL Type Handling:
+ * - Uses OIDs to identify PostgreSQL data types
+ * - Preserves numeric types (int2, int4, int8, float4, float8, numeric) in JSON
+ * - Handles boolean type ('t'/'f' to true/false)
+ *
+ * PostgreSQL Escaping Conventions:
+ * - Identifiers: Double quotes with doubled double-quotes for escaping
+ * - Strings: Single quotes with doubled single-quotes and backslash handling
+ */
+
 #include "PostgreSQLFormatConverter.hpp"
 #include <sstream>
 
 namespace sqlfuse {
+
+// ============================================================================
+// PostgreSQL Type OID Constants
+// ============================================================================
 
 // PostgreSQL OID constants for common types
 constexpr Oid BOOLOID = 16;
@@ -11,6 +33,10 @@ constexpr Oid INT8OID = 20;
 constexpr Oid FLOAT4OID = 700;
 constexpr Oid FLOAT8OID = 701;
 constexpr Oid NUMERICOID = 1700;
+
+// ============================================================================
+// Type Classification Helpers
+// ============================================================================
 
 bool PostgreSQLFormatConverter::isNumericType(Oid type) {
     return type == INT2OID || type == INT4OID || type == INT8OID ||
@@ -27,6 +53,10 @@ std::string PostgreSQLFormatConverter::formatValue(PGresult* result, int row, in
     }
     return PQgetvalue(result, row, col);
 }
+
+// ============================================================================
+// CSV Output
+// ============================================================================
 
 std::string PostgreSQLFormatConverter::toCSV(PGresult* result, const CSVOptions& options) {
     if (!result || PQresultStatus(result) != PGRES_TUPLES_OK) {
@@ -67,6 +97,10 @@ std::string PostgreSQLFormatConverter::toCSV(PGresult* result, const CSVOptions&
 std::string PostgreSQLFormatConverter::toCSV(PostgreSQLResultSet& result, const CSVOptions& options) {
     return toCSV(result.get(), options);
 }
+
+// ============================================================================
+// JSON Output
+// ============================================================================
 
 std::string PostgreSQLFormatConverter::toJSON(PGresult* result, const JSONOptions& options) {
     if (!result || PQresultStatus(result) != PGRES_TUPLES_OK) {
@@ -176,6 +210,10 @@ std::string PostgreSQLFormatConverter::rowToJSON(PGresult* result, int row,
     return options.pretty ? obj.dump(options.indent) : obj.dump();
 }
 
+// ============================================================================
+// SQL Statement Builders
+// ============================================================================
+
 std::string PostgreSQLFormatConverter::buildInsert(const std::string& table,
                                                      const RowData& row,
                                                      bool escape) {
@@ -275,6 +313,10 @@ std::string PostgreSQLFormatConverter::buildDelete(const std::string& table,
 
     return sql.str();
 }
+
+// ============================================================================
+// Escaping Utilities
+// ============================================================================
 
 std::string PostgreSQLFormatConverter::escapeIdentifier(const std::string& identifier) {
     // Handle schema.table format by escaping each part separately

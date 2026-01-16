@@ -1,14 +1,32 @@
+/**
+ * @file PostgreSQLResultSet.cpp
+ * @brief Implementation of RAII PostgreSQL result set wrapper.
+ *
+ * Implements the PostgreSQLResultSet class which provides a safe wrapper around
+ * PGresult handles with automatic memory management. Supports both random access
+ * (by row/column index) and sequential row iteration via fetchRow().
+ */
+
 #include "PostgreSQLResultSet.hpp"
 
 namespace sqlfuse {
 
+// ============================================================================
+// Construction and Destruction
+// ============================================================================
+
 PostgreSQLResultSet::PostgreSQLResultSet(PGresult* res) : m_res(res), m_currentRow(-1) {}
 
 PostgreSQLResultSet::~PostgreSQLResultSet() {
+    // Free result memory allocated by libpq
     if (m_res) {
         PQclear(m_res);
     }
 }
+
+// ============================================================================
+// Move Operations
+// ============================================================================
 
 PostgreSQLResultSet::PostgreSQLResultSet(PostgreSQLResultSet&& other) noexcept
     : m_res(other.m_res), m_currentRow(other.m_currentRow) {
@@ -28,6 +46,10 @@ PostgreSQLResultSet& PostgreSQLResultSet::operator=(PostgreSQLResultSet&& other)
     }
     return *this;
 }
+
+// ============================================================================
+// Result Status
+// ============================================================================
 
 bool PostgreSQLResultSet::isOk() const {
     if (!m_res) return false;
@@ -58,6 +80,10 @@ int PostgreSQLResultSet::numFields() const {
 int PostgreSQLResultSet::numRows() const {
     return m_res ? PQntuples(m_res) : 0;
 }
+
+// ============================================================================
+// Random Access Data Retrieval
+// ============================================================================
 
 const char* PostgreSQLResultSet::getValue(int row, int col) const {
     if (!m_res) return nullptr;
@@ -106,6 +132,10 @@ std::vector<std::string> PostgreSQLResultSet::getColumnNames() const {
     return names;
 }
 
+// ============================================================================
+// Sequential Row Iteration
+// ============================================================================
+
 bool PostgreSQLResultSet::fetchRow() {
     if (!m_res || !hasData()) return false;
 
@@ -120,6 +150,10 @@ const char* PostgreSQLResultSet::getField(int col) const {
 bool PostgreSQLResultSet::isFieldNull(int col) const {
     return isNull(m_currentRow, col);
 }
+
+// ============================================================================
+// Result Management
+// ============================================================================
 
 void PostgreSQLResultSet::reset(PGresult* res) {
     if (m_res) {

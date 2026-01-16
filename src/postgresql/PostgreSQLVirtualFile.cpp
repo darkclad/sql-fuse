@@ -1,3 +1,18 @@
+/**
+ * @file PostgreSQLVirtualFile.cpp
+ * @brief Implementation of PostgreSQL-specific virtual file operations.
+ *
+ * Implements the PostgreSQLVirtualFile class which generates file content
+ * (CSV, JSON, SQL) from PostgreSQL database objects and handles write operations
+ * (INSERT, UPDATE) through the FUSE filesystem interface.
+ *
+ * PostgreSQL-Specific Notes:
+ * - Uses primary key for row identification
+ * - Double-quote identifier escaping (standard SQL)
+ * - Supports PostgreSQL-specific types (arrays, JSON, etc.)
+ * - Leverages PostgreSQLFormatConverter for type-aware JSON output
+ */
+
 #include "PostgreSQLVirtualFile.hpp"
 #include "PostgreSQLResultSet.hpp"
 #include "PostgreSQLFormatConverter.hpp"
@@ -7,6 +22,10 @@
 #include <sstream>
 
 namespace sqlfuse {
+
+// ============================================================================
+// Construction
+// ============================================================================
 
 PostgreSQLVirtualFile::PostgreSQLVirtualFile(const ParsedPath& path,
                                    SchemaManager& schema,
@@ -18,6 +37,10 @@ PostgreSQLVirtualFile::PostgreSQLVirtualFile(const ParsedPath& path,
 PostgreSQLConnectionPool* PostgreSQLVirtualFile::getPool() {
     return dynamic_cast<PostgreSQLConnectionPool*>(&m_schema.connectionPool());
 }
+
+// ============================================================================
+// Content Generation - Tables
+// ============================================================================
 
 std::string PostgreSQLVirtualFile::generateTableCSV() {
     auto* pool = getPool();
@@ -71,6 +94,10 @@ std::string PostgreSQLVirtualFile::generateTableJSON() {
     return PostgreSQLFormatConverter::toJSON(result.get(), opts);
 }
 
+// ============================================================================
+// Content Generation - Individual Rows
+// ============================================================================
+
 std::string PostgreSQLVirtualFile::generateRowJSON() {
     auto* pool = getPool();
     if (!pool) {
@@ -100,6 +127,10 @@ std::string PostgreSQLVirtualFile::generateRowJSON() {
 
     return PostgreSQLFormatConverter::rowToJSON(result.get(), 0, opts) + "\n";
 }
+
+// ============================================================================
+// Content Generation - Views
+// ============================================================================
 
 std::string PostgreSQLVirtualFile::generateViewContent() {
     if (m_path.format == FileFormat::SQL) {
@@ -137,6 +168,10 @@ std::string PostgreSQLVirtualFile::generateViewContent() {
         return PostgreSQLFormatConverter::toJSON(result.get(), opts);
     }
 }
+
+// ============================================================================
+// Content Generation - Database and User Info
+// ============================================================================
 
 std::string PostgreSQLVirtualFile::generateDatabaseInfo() {
     auto* pool = getPool();
@@ -220,6 +255,10 @@ std::string PostgreSQLVirtualFile::generateUserInfo() {
 
     return out.str();
 }
+
+// ============================================================================
+// Write Operations
+// ============================================================================
 
 int PostgreSQLVirtualFile::handleTableWrite() {
     if (m_writeBuffer.empty()) {
