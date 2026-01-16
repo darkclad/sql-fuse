@@ -15,6 +15,12 @@
 #include "SQLiteFormatConverter.hpp"
 #endif
 
+#ifdef WITH_POSTGRESQL
+#include "PostgreSQLSchemaManager.hpp"
+#include "PostgreSQLFormatConverter.hpp"
+#include "PostgreSQLResultSet.hpp"
+#endif
+
 namespace sqlfuse {
 
 // Singleton instance
@@ -96,8 +102,32 @@ int SQLFuseFS::init(const Config& config) {
             }
 #endif
 
+#ifdef WITH_POSTGRESQL
+            case DatabaseType::PostgreSQL: {
+                auto pool = std::make_unique<PostgreSQLConnectionPool>(
+                    m_config.connection,
+                    m_config.performance.connection_pool_size);
+
+                if (!pool->healthCheck()) {
+                    spdlog::error("Failed to connect to PostgreSQL server");
+                    return -1;
+                }
+
+                m_pool = std::move(pool);
+
+                m_schema = std::make_unique<PostgreSQLSchemaManager>(
+                    *std::get<std::unique_ptr<PostgreSQLConnectionPool>>(m_pool), *m_cache);
+
+                m_fileHandles = std::make_unique<VirtualFileHandleManager>(
+                    *m_schema, *m_cache, m_config.data);
+
+                spdlog::info("Connected to PostgreSQL server");
+                break;
+            }
+#else
             case DatabaseType::PostgreSQL:
-                throw std::runtime_error("PostgreSQL support is not yet implemented");
+                throw std::runtime_error("PostgreSQL support is not compiled in");
+#endif
 
             case DatabaseType::Oracle:
                 throw std::runtime_error("Oracle support is not yet implemented");
@@ -690,6 +720,27 @@ int SQLFuseFS::unlink(const char* path) {
             }
             affected_rows = conn->changes();
             (*pool)->release(std::move(conn));
+        }
+#endif
+
+#ifdef WITH_POSTGRESQL
+        if (m_dbType == DatabaseType::PostgreSQL) {
+            std::string sql = PostgreSQLFormatConverter::buildDelete(
+                parsed.object_name,
+                table_info->primaryKeyColumn,
+                parsed.row_id,
+                true);
+            auto* pool = std::get_if<std::unique_ptr<PostgreSQLConnectionPool>>(&m_pool);
+            if (!pool || !*pool) {
+                return -EIO;
+            }
+            auto conn = (*pool)->acquire();
+            PostgreSQLResultSet result(conn->execute(sql));
+            if (!result.isOk()) {
+                spdlog::error("PostgreSQL delete error: {}", result.errorMessage());
+                return -EIO;
+            }
+            affected_rows = static_cast<int>(conn->affectedRows(result.get()));
         }
 #endif
 

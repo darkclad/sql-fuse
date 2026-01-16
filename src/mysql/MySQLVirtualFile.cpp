@@ -256,13 +256,6 @@ int MySQLVirtualFile::handleTableWrite() {
         std::vector<RowData> rows;
 
         if (m_path.format == FileFormat::CSV) {
-            // Get column names for CSV parsing
-            auto columns = m_schema.getColumns(m_path.database, m_path.object_name);
-            std::vector<std::string> col_names;
-            for (const auto& col : columns) {
-                col_names.push_back(col.name);
-            }
-
             CSVOptions opts;
             opts.includeHeader = true;  // Assume header in written data
             rows = FormatConverter::parseCSV(m_writeBuffer, opts);

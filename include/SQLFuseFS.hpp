@@ -18,6 +18,11 @@
 #include "SQLiteSchemaManager.hpp"
 #endif
 
+#ifdef WITH_POSTGRESQL
+#include "PostgreSQLConnectionPool.hpp"
+#include "PostgreSQLSchemaManager.hpp"
+#endif
+
 #include <fuse3/fuse.h>
 #include <memory>
 #include <string>
@@ -76,6 +81,14 @@ public:
         return nullptr;
     }
 #endif
+#ifdef WITH_POSTGRESQL
+    PostgreSQLConnectionPool* postgresqlConnectionPool() {
+        if (auto* pool = std::get_if<std::unique_ptr<PostgreSQLConnectionPool>>(&m_pool)) {
+            return pool->get();
+        }
+        return nullptr;
+    }
+#endif
     SchemaManager* schemaManager() { return m_schema.get(); }
     CacheManager* cacheManager() { return m_cache.get(); }
     PathRouter* pathRouter() { return &m_router; }
@@ -124,6 +137,9 @@ private:
 #endif
 #ifdef WITH_SQLITE
         , std::unique_ptr<SQLiteConnectionPool>
+#endif
+#ifdef WITH_POSTGRESQL
+        , std::unique_ptr<PostgreSQLConnectionPool>
 #endif
     > m_pool;
 

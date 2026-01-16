@@ -5,8 +5,9 @@ Mount SQL databases as a virtual filesystem using FUSE (Filesystem in Userspace)
 **Supported databases:**
 - MySQL/MariaDB
 - SQLite
+- PostgreSQL
 
-PostgreSQL and Oracle support planned for future releases.
+Oracle support planned for future releases.
 
 ## Features
 
@@ -25,7 +26,7 @@ PostgreSQL and Oracle support planned for future releases.
 - Linux with FUSE 3.x support
 - C++20 compiler (GCC 10+, Clang 12+)
 - CMake 3.16+
-- At least one database client library (MySQL and/or SQLite)
+- At least one database client library (MySQL, SQLite, and/or PostgreSQL)
 
 ### Ubuntu/Debian
 
@@ -38,12 +39,21 @@ sudo apt-get install libmysqlclient-dev mysql-client
 
 # For SQLite support
 sudo apt-get install libsqlite3-dev sqlite3
+
+# For PostgreSQL support
+sudo apt-get install libpq-dev postgresql-client
 ```
 
 For running the MySQL test database, you also need MySQL server:
 ```bash
 sudo apt-get install mysql-server
 sudo systemctl start mysql
+```
+
+For running the PostgreSQL test database:
+```bash
+sudo apt-get install postgresql
+sudo systemctl start postgresql
 ```
 
 ### Fedora/RHEL
@@ -57,12 +67,22 @@ sudo dnf install mysql-devel mysql
 
 # For SQLite support
 sudo dnf install sqlite-devel sqlite
+
+# For PostgreSQL support
+sudo dnf install libpq-devel postgresql
 ```
 
 For running the MySQL test database:
 ```bash
 sudo dnf install mysql-server
 sudo systemctl start mysqld
+```
+
+For running the PostgreSQL test database:
+```bash
+sudo dnf install postgresql-server
+sudo postgresql-setup --initdb
+sudo systemctl start postgresql
 ```
 
 ### Arch Linux
@@ -76,6 +96,9 @@ sudo pacman -S mariadb-libs mariadb-clients
 
 # For SQLite support
 sudo pacman -S sqlite
+
+# For PostgreSQL support
+sudo pacman -S postgresql-libs
 ```
 
 For running the MySQL test database:
@@ -85,9 +108,16 @@ sudo mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql
 sudo systemctl start mariadb
 ```
 
+For running the PostgreSQL test database:
+```bash
+sudo pacman -S postgresql
+sudo -u postgres initdb -D /var/lib/postgres/data
+sudo systemctl start postgresql
+```
+
 ## Building
 
-By default, both MySQL and SQLite support are enabled.
+By default, MySQL, SQLite, and PostgreSQL support are enabled (if libraries are found).
 
 ```bash
 git clone <repository-url>
@@ -102,14 +132,20 @@ make -j$(nproc)
 You can enable/disable specific database backends:
 
 ```bash
-# Build with both MySQL and SQLite (default)
+# Build with all backends (default, if libraries found)
 cmake ..
 
 # Build with MySQL only
-cmake -DWITH_MYSQL=ON -DWITH_SQLITE=OFF ..
+cmake -DWITH_MYSQL=ON -DWITH_SQLITE=OFF -DWITH_POSTGRESQL=OFF ..
 
 # Build with SQLite only
-cmake -DWITH_MYSQL=OFF -DWITH_SQLITE=ON ..
+cmake -DWITH_MYSQL=OFF -DWITH_SQLITE=ON -DWITH_POSTGRESQL=OFF ..
+
+# Build with PostgreSQL only
+cmake -DWITH_MYSQL=OFF -DWITH_SQLITE=OFF -DWITH_POSTGRESQL=ON ..
+
+# Build with MySQL and PostgreSQL
+cmake -DWITH_MYSQL=ON -DWITH_SQLITE=OFF -DWITH_POSTGRESQL=ON ..
 ```
 
 For debug build:
@@ -197,6 +233,38 @@ The SQLite test database includes:
 - 5 triggers
 - Sample data for testing
 
+### PostgreSQL Test Database
+
+**Prerequisites:** PostgreSQL server must be running:
+```bash
+# Check if PostgreSQL is running
+sudo systemctl status postgresql
+
+# Start if not running
+sudo systemctl start postgresql
+```
+
+**Setup:**
+```bash
+cd tests/postgresql
+
+# Setup test database (creates 'fuse_test' database and user)
+./setup_test_db.sh
+
+# Verify setup
+PGPASSWORD=fuse_test_password psql -h localhost -U fuse_test -d fuse_test -f verify_test_db.sql
+
+# Teardown when done
+./teardown_test_db.sh
+```
+
+The PostgreSQL test database includes:
+- 8 tables (users, categories, products, orders, order_items, audit_log, settings)
+- 5 views (v_active_users, v_product_catalog, v_order_summary, v_revenue_by_category, v_low_stock)
+- 5 stored functions
+- 7 triggers
+- Sample data for testing
+
 ## Usage
 
 ### MySQL Usage
@@ -242,6 +310,32 @@ sql-fuse -t sqlite -H /path/to/database.db --read-only /mnt/sql
 fusermount -u /mnt/sql
 ```
 
+### PostgreSQL Usage
+
+```bash
+# Mount PostgreSQL with username and password
+sql-fuse -t postgresql -H localhost -u myuser -p mypassword /mnt/sql
+
+# Mount with password from environment
+export PGPASSWORD=mypassword
+sql-fuse -t postgresql -u myuser /mnt/sql
+
+# Mount with specific database
+sql-fuse -t postgresql -H localhost -u myuser -p mypassword -D mydb /mnt/sql
+
+# Mount with custom port
+sql-fuse -t postgresql -H localhost -P 5432 -u myuser -p mypassword /mnt/sql
+
+# Mount in foreground with debug output
+sql-fuse -t postgresql -u myuser -H localhost -f -d /mnt/sql
+
+# Mount as read-only
+sql-fuse -t postgresql -u myuser --read-only /mnt/sql
+
+# Unmount
+fusermount -u /mnt/sql
+```
+
 ### Using with MySQL Test Database
 
 ```bash
@@ -273,6 +367,24 @@ cd tests/sqlite && ./setup_test_db.sh && cd ../..
 ls /tmp/sql-fuse/main/tables/
 cat /tmp/sql-fuse/main/tables/users.csv
 cat /tmp/sql-fuse/main/tables/products.json
+```
+
+### Using with PostgreSQL Test Database
+
+```bash
+# Create mount point
+mkdir -p /tmp/sql-fuse
+
+# First, create the test database
+cd tests/postgresql && ./setup_test_db.sh && cd ../..
+
+# Mount PostgreSQL test database
+./sql-fuse -t postgresql -H localhost -u fuse_test -p fuse_test_password -D fuse_test -f /tmp/sql-fuse
+
+# In another terminal, browse the filesystem
+ls /tmp/sql-fuse/fuse_test/tables/
+cat /tmp/sql-fuse/fuse_test/tables/users.csv
+cat /tmp/sql-fuse/fuse_test/tables/products.json
 ```
 
 ### Configuration File
@@ -383,14 +495,14 @@ cat /mnt/sql/.variables/global/max_connections
 
 ```
 Database Type:
-  -t, --type <type>         Database type: mysql, sqlite (default: mysql)
+  -t, --type <type>         Database type: mysql, sqlite, postgresql (default: mysql)
 
 Connection Options:
   -H, --host <host>         Database server host (default: localhost)
                             For SQLite: path to database file
-  -P, --port <port>         Database server port (default: 3306)
-  -u, --user <user>         Database username (required for MySQL)
-  -p, --password <pass>     Database password (or use MYSQL_PWD env)
+  -P, --port <port>         Database server port (default: 3306 MySQL, 5432 PostgreSQL)
+  -u, --user <user>         Database username (required for MySQL/PostgreSQL)
+  -p, --password <pass>     Database password (or use MYSQL_PWD/PGPASSWORD env)
   -S, --socket <path>       Unix socket path
   -D, --database <db>       Default database (or SQLite file path)
 
@@ -468,12 +580,17 @@ sql-fuse/
     ├── test_config.cpp
     ├── test_error_handler.cpp
     ├── test_format_converter.cpp
-    └── test_path_router.cpp
+    ├── test_path_router.cpp
+    └── postgresql/               # PostgreSQL test database scripts
+        ├── setup_test_db.sh
+        ├── setup_test_db.sql
+        ├── teardown_test_db.sh
+        └── verify_test_db.sql
 ```
 
 ## Security Considerations
 
-- Store passwords in the `MYSQL_PWD` environment variable rather than command line
+- Store passwords in environment variables (`MYSQL_PWD`, `PGPASSWORD`) rather than command line
 - Use `--read-only` mode when you only need to browse data
 - Create a database user with minimal required privileges
 - Use the `--databases` option to limit exposed databases

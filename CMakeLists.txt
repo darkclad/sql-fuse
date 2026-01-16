@@ -16,7 +16,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 # Database backend options
 option(WITH_MYSQL "Build with MySQL/MariaDB support" ON)
 option(WITH_SQLITE "Build with SQLite support" ON)
-option(WITH_POSTGRESQL "Build with PostgreSQL support (future)" OFF)
+option(WITH_POSTGRESQL "Build with PostgreSQL support" ON)
 option(WITH_ORACLE "Build with Oracle support (future)" OFF)
 
 # At least one database backend must be enabled
@@ -45,7 +45,7 @@ endif()
 
 if(WITH_POSTGRESQL)
     pkg_check_modules(PGSQL REQUIRED libpq)
-    message(STATUS "PostgreSQL support: ENABLED (not yet implemented)")
+    message(STATUS "PostgreSQL support: ENABLED")
 else()
     message(STATUS "PostgreSQL support: DISABLED")
 endif()
@@ -122,6 +122,17 @@ if(WITH_SQLITE)
     )
 endif()
 
+if(WITH_POSTGRESQL)
+    list(APPEND SOURCES
+        src/postgresql/PostgreSQLConnection.cpp
+        src/postgresql/PostgreSQLConnectionPool.cpp
+        src/postgresql/PostgreSQLResultSet.cpp
+        src/postgresql/PostgreSQLSchemaManager.cpp
+        src/postgresql/PostgreSQLVirtualFile.cpp
+        src/postgresql/PostgreSQLFormatConverter.cpp
+    )
+endif()
+
 # Main executable
 add_executable(sql-fuse ${SOURCES})
 
@@ -145,6 +156,13 @@ if(WITH_SQLITE)
     )
 endif()
 
+if(WITH_POSTGRESQL)
+    target_include_directories(sql-fuse PRIVATE
+        ${CMAKE_SOURCE_DIR}/include/postgresql
+        ${PGSQL_INCLUDE_DIRS}
+    )
+endif()
+
 # Link libraries
 target_link_libraries(sql-fuse PRIVATE
     ${FUSE3_LIBRARIES}
@@ -160,6 +178,10 @@ endif()
 
 if(WITH_SQLITE)
     target_link_libraries(sql-fuse PRIVATE ${SQLITE3_LIBRARIES})
+endif()
+
+if(WITH_POSTGRESQL)
+    target_link_libraries(sql-fuse PRIVATE ${PGSQL_LIBRARIES})
 endif()
 
 # Compile definitions
