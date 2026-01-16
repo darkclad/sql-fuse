@@ -1,3 +1,11 @@
+/**
+ * @file MySQLConnectionPool.cpp
+ * @brief Implementation of thread-safe MySQL connection pool.
+ *
+ * Implements the MySQLConnectionPool class which manages a pool of MySQL
+ * connections for efficient reuse across concurrent operations.
+ */
+
 #include "MySQLConnectionPool.hpp"
 #include "MySQLVirtualFile.hpp"
 #include "ErrorHandler.hpp"
@@ -6,16 +14,20 @@
 
 namespace sqlfuse {
 
+// ============================================================================
+// Construction and Destruction
+// ============================================================================
+
 MySQLConnectionPool::MySQLConnectionPool(const ConnectionConfig& config, size_t poolSize)
     : m_config(config), m_poolSize(poolSize) {
 
-    // Initialize MySQL library (thread-safe)
+    // Initialize MySQL library (thread-safe, called once per process)
     static std::once_flag mysqlInitFlag;
     std::call_once(mysqlInitFlag, []() {
         mysql_library_init(0, nullptr, nullptr);
     });
 
-    // Pre-create some connections
+    // Pre-create some connections to reduce initial latency
     size_t initialCount = std::min(poolSize / 2, size_t(3));
     for (size_t i = 0; i < initialCount; ++i) {
         try {
@@ -36,13 +48,18 @@ MySQLConnectionPool::~MySQLConnectionPool() {
     drain();
 }
 
+// ============================================================================
+// Connection Creation and Validation
+// ============================================================================
+
 MYSQL* MySQLConnectionPool::createConnection() {
+    // Initialize connection handle
     MYSQL* conn = mysql_init(nullptr);
     if (!conn) {
         throw MySQLException(0, "Failed to initialize MySQL connection");
     }
 
-    // Set options
+    // Configure connection timeouts (convert ms to seconds)
     unsigned int timeout = static_cast<unsigned int>(
         m_config.connect_timeout.count() / 1000);
     mysql_options(conn, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
@@ -55,11 +72,11 @@ MYSQL* MySQLConnectionPool::createConnection() {
         m_config.write_timeout.count() / 1000);
     mysql_options(conn, MYSQL_OPT_WRITE_TIMEOUT, &writeTimeout);
 
-    // Enable auto-reconnect
+    // Enable automatic reconnection on connection loss
     bool reconnect = true;
     mysql_options(conn, MYSQL_OPT_RECONNECT, &reconnect);
 
-    // SSL options
+    // Configure SSL if enabled
     if (m_config.use_ssl) {
         mysql_ssl_set(conn,
                      m_config.ssl_key.empty() ? nullptr : m_config.ssl_key.c_str(),
@@ -68,7 +85,7 @@ MYSQL* MySQLConnectionPool::createConnection() {
                      nullptr, nullptr);
     }
 
-    // Connect
+    // Establish connection to server
     const char* socket = m_config.socket.empty() ? nullptr : m_config.socket.c_str();
     const char* db = m_config.default_database.empty() ? nullptr : m_config.default_database.c_str();
 
@@ -86,7 +103,7 @@ MYSQL* MySQLConnectionPool::createConnection() {
         throw MySQLException(err, "Failed to connect to MySQL: " + msg);
     }
 
-    // Set character set to UTF-8
+    // Configure UTF-8 character set for proper unicode support
     mysql_set_character_set(conn, "utf8mb4");
 
     m_createdCount++;
@@ -94,6 +111,31 @@ MYSQL* MySQLConnectionPool::createConnection() {
 
     return conn;
 }
+
+bool MySQLConnectionPool::validateConnection(MYSQL* conn) {
+    if (!conn) return false;
+
+    // Quick ping to verify connection is alive
+    // mysql_ping() also attempts reconnection if needed
+    if (mysql_ping(conn) != 0) {
+        spdlog::debug("Connection validation failed: {}", mysql_error(conn));
+        return false;
+    }
+
+    return true;
+}
+
+void MySQLConnectionPool::destroyConnection(MYSQL* conn) {
+    if (conn) {
+        mysql_close(conn);
+        m_createdCount--;
+        spdlog::debug("Destroyed MySQL connection (remaining: {})", m_createdCount.load());
+    }
+}
+
+// ============================================================================
+// Connection Acquisition
+// ============================================================================
 
 std::unique_ptr<MySQLConnection> MySQLConnectionPool::acquire(std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(m_mutex);
@@ -103,7 +145,7 @@ std::unique_ptr<MySQLConnection> MySQLConnectionPool::acquire(std::chrono::milli
     auto deadline = std::chrono::steady_clock::now() + timeout;
 
     while (m_available.empty() && !m_shutdown) {
-        // Try to create a new connection if under limit
+        // Try to create a new connection if under pool size limit
         if (m_createdCount < m_poolSize) {
             lock.unlock();
             try {
@@ -130,14 +172,14 @@ std::unique_ptr<MySQLConnection> MySQLConnectionPool::acquire(std::chrono::milli
         throw MySQLException(CR_CONNECTION_ERROR, "Connection pool is shutting down");
     }
 
+    // Get connection from pool
     MYSQL* conn = m_available.front();
     m_available.pop();
 
-    // Validate the connection
+    // Validate before returning; create fresh connection if invalid
     if (!validateConnection(conn)) {
         destroyConnection(conn);
         lock.unlock();
-        // Try to create a new one
         conn = createConnection();
     }
 
@@ -162,11 +204,16 @@ std::unique_ptr<MySQLConnection> MySQLConnectionPool::tryAcquire() {
     return std::make_unique<MySQLConnection>(this, conn);
 }
 
+// ============================================================================
+// Connection Release
+// ============================================================================
+
 void MySQLConnectionPool::releaseConnection(MYSQL* conn) {
     if (!conn) return;
 
     std::lock_guard<std::mutex> lock(m_mutex);
 
+    // If shutting down, destroy instead of returning to pool
     if (m_shutdown) {
         destroyConnection(conn);
         return;
@@ -176,25 +223,9 @@ void MySQLConnectionPool::releaseConnection(MYSQL* conn) {
     m_cv.notify_one();
 }
 
-void MySQLConnectionPool::destroyConnection(MYSQL* conn) {
-    if (conn) {
-        mysql_close(conn);
-        m_createdCount--;
-        spdlog::debug("Destroyed MySQL connection (remaining: {})", m_createdCount.load());
-    }
-}
-
-bool MySQLConnectionPool::validateConnection(MYSQL* conn) {
-    if (!conn) return false;
-
-    // Quick ping to check if connection is alive
-    if (mysql_ping(conn) != 0) {
-        spdlog::debug("Connection validation failed: {}", mysql_error(conn));
-        return false;
-    }
-
-    return true;
-}
+// ============================================================================
+// Pool Statistics and Management
+// ============================================================================
 
 size_t MySQLConnectionPool::availableCount() const {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -222,6 +253,7 @@ void MySQLConnectionPool::drain() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_shutdown = true;
 
+    // Close all idle connections
     while (!m_available.empty()) {
         MYSQL* conn = m_available.front();
         m_available.pop();
@@ -234,6 +266,10 @@ void MySQLConnectionPool::drain() {
     m_cv.notify_all();
     spdlog::info("MySQL connection pool drained");
 }
+
+// ============================================================================
+// Virtual File Factory
+// ============================================================================
 
 std::unique_ptr<VirtualFile> MySQLConnectionPool::createVirtualFile(
     const ParsedPath& path,

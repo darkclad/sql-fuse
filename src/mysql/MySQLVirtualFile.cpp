@@ -1,3 +1,11 @@
+/**
+ * @file MySQLVirtualFile.cpp
+ * @brief Implementation of MySQL-specific virtual file operations.
+ *
+ * Implements the MySQLVirtualFile class which provides MySQL-specific
+ * content generation and write handling for the FUSE filesystem.
+ */
+
 #include "MySQLVirtualFile.hpp"
 #include "MySQLResultSet.hpp"
 #include "MySQLFormatConverter.hpp"
@@ -7,6 +15,10 @@
 #include <sstream>
 
 namespace sqlfuse {
+
+// ============================================================================
+// Construction
+// ============================================================================
 
 MySQLVirtualFile::MySQLVirtualFile(const ParsedPath& path,
                                    SchemaManager& schema,
@@ -19,6 +31,10 @@ MySQLConnectionPool* MySQLVirtualFile::getPool() {
     return dynamic_cast<MySQLConnectionPool*>(&m_schema.connectionPool());
 }
 
+// ============================================================================
+// Table Content Generation
+// ============================================================================
+
 std::string MySQLVirtualFile::generateTableCSV() {
     auto* pool = getPool();
     if (!pool) {
@@ -27,6 +43,7 @@ std::string MySQLVirtualFile::generateTableCSV() {
     }
     auto conn = pool->acquire();
 
+    // Build SELECT query with optional row limit
     std::string sql = "SELECT * FROM `" + m_path.database + "`.`" + m_path.object_name + "`";
     if (m_config.max_rows_per_file > 0) {
         sql += " LIMIT " + std::to_string(m_config.max_rows_per_file);
@@ -52,6 +69,7 @@ std::string MySQLVirtualFile::generateTableJSON() {
     }
     auto conn = pool->acquire();
 
+    // Build SELECT query with optional row limit
     std::string sql = "SELECT * FROM `" + m_path.database + "`.`" + m_path.object_name + "`";
     if (m_config.max_rows_per_file > 0) {
         sql += " LIMIT " + std::to_string(m_config.max_rows_per_file);
@@ -69,6 +87,10 @@ std::string MySQLVirtualFile::generateTableJSON() {
     return MySQLFormatConverter::toJSON(result.get(), opts);
 }
 
+// ============================================================================
+// Row Content Generation
+// ============================================================================
+
 std::string MySQLVirtualFile::generateRowJSON() {
     auto* pool = getPool();
     if (!pool) {
@@ -76,6 +98,7 @@ std::string MySQLVirtualFile::generateRowJSON() {
         return "{}";
     }
 
+    // Get table's primary key column for WHERE clause
     auto table_info = m_schema.getTableInfo(m_path.database, m_path.object_name);
     if (!table_info || table_info->primaryKeyColumn.empty()) {
         return "{}";
@@ -83,6 +106,7 @@ std::string MySQLVirtualFile::generateRowJSON() {
 
     auto conn = pool->acquire();
 
+    // Query single row by primary key
     std::string sql = "SELECT * FROM `" + m_path.database + "`.`" + m_path.object_name +
                       "` WHERE `" + table_info->primaryKeyColumn + "` = '" +
                       MySQLFormatConverter::escapeSQL(m_path.row_id) + "'";
@@ -104,7 +128,12 @@ std::string MySQLVirtualFile::generateRowJSON() {
     return MySQLFormatConverter::rowToJSON(row, result.get(), opts) + "\n";
 }
 
+// ============================================================================
+// View Content Generation
+// ============================================================================
+
 std::string MySQLVirtualFile::generateViewContent() {
+    // For .sql files, return the CREATE VIEW statement
     if (m_path.format == FileFormat::SQL) {
         return m_schema.getCreateStatement(m_path.database, m_path.object_name, "VIEW") + ";\n";
     }
@@ -115,7 +144,7 @@ std::string MySQLVirtualFile::generateViewContent() {
         return "";
     }
 
-    // Generate data from view
+    // For CSV/JSON, generate data from the view
     auto conn = pool->acquire();
 
     std::string sql = "SELECT * FROM `" + m_path.database + "`.`" + m_path.object_name + "`";
@@ -140,6 +169,10 @@ std::string MySQLVirtualFile::generateViewContent() {
     }
 }
 
+// ============================================================================
+// Database and User Information
+// ============================================================================
+
 std::string MySQLVirtualFile::generateDatabaseInfo() {
     auto* pool = getPool();
     if (!pool) {
@@ -149,6 +182,7 @@ std::string MySQLVirtualFile::generateDatabaseInfo() {
 
     auto conn = pool->acquire();
 
+    // Query database metadata from INFORMATION_SCHEMA
     std::string sql = "SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME "
                       "FROM INFORMATION_SCHEMA.SCHEMATA "
                       "WHERE SCHEMA_NAME = '" + MySQLFormatConverter::escapeSQL(m_path.database) + "'";
@@ -170,7 +204,7 @@ std::string MySQLVirtualFile::generateDatabaseInfo() {
     out << "Character Set: " << (row[1] ? row[1] : "") << "\n";
     out << "Collation: " << (row[2] ? row[2] : "") << "\n";
 
-    // Count objects
+    // Count database objects
     auto tables = m_schema.getTables(m_path.database);
     auto views = m_schema.getViews(m_path.database);
     auto procedures = m_schema.getProcedures(m_path.database);
@@ -194,7 +228,7 @@ std::string MySQLVirtualFile::generateUserInfo() {
         return "";
     }
 
-    // m_path.object_name contains "user@host.info"
+    // Parse user@host from object_name
     std::string user_host = m_path.object_name;
 
     // Remove .info suffix if present
@@ -213,6 +247,7 @@ std::string MySQLVirtualFile::generateUserInfo() {
 
     auto conn = pool->acquire();
 
+    // Query user details from mysql.user system table
     std::string sql = "SELECT User, Host, account_locked, password_expired, "
                       "max_connections, max_user_connections "
                       "FROM mysql.user "
@@ -241,6 +276,10 @@ std::string MySQLVirtualFile::generateUserInfo() {
     return out.str();
 }
 
+// ============================================================================
+// Write Operations
+// ============================================================================
+
 int MySQLVirtualFile::handleTableWrite() {
     if (m_writeBuffer.empty()) {
         return 0;
@@ -253,6 +292,7 @@ int MySQLVirtualFile::handleTableWrite() {
     }
 
     try {
+        // Parse written data as CSV or JSON
         std::vector<RowData> rows;
 
         if (m_path.format == FileFormat::CSV) {
@@ -268,6 +308,7 @@ int MySQLVirtualFile::handleTableWrite() {
 
         auto conn = pool->acquire();
 
+        // Insert each row
         for (const auto& row : rows) {
             std::string sql = MySQLFormatConverter::buildInsert(
                 m_path.database + "." + m_path.object_name, row, true);
@@ -298,6 +339,7 @@ int MySQLVirtualFile::handleRowWrite() {
     }
 
     try {
+        // Get primary key info for INSERT/UPDATE decision
         auto table_info = m_schema.getTableInfo(m_path.database, m_path.object_name);
         if (!table_info || table_info->primaryKeyColumn.empty()) {
             m_lastError = "No primary key defined";
@@ -308,7 +350,7 @@ int MySQLVirtualFile::handleRowWrite() {
 
         auto conn = pool->acquire();
 
-        // Check if row exists (by checking if row_id is numeric and exists)
+        // Check if row exists to decide between INSERT and UPDATE
         bool rowExists = false;
         bool isNumericId = !m_path.row_id.empty() &&
                           m_path.row_id.find_first_not_of("0123456789") == std::string::npos;

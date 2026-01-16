@@ -1,7 +1,19 @@
+/**
+ * @file MySQLFormatConverter.cpp
+ * @brief Implementation of MySQL-specific data format conversion utilities.
+ *
+ * Implements format conversion methods for MySQL result sets to CSV/JSON
+ * and SQL statement generation with proper MySQL escaping conventions.
+ */
+
 #include "MySQLFormatConverter.hpp"
 #include <sstream>
 
 namespace sqlfuse {
+
+// ============================================================================
+// Result Set to CSV Conversion
+// ============================================================================
 
 std::string MySQLFormatConverter::toCSV(MYSQL_RES* result, const CSVOptions& options) {
     if (!result) {
@@ -13,7 +25,7 @@ std::string MySQLFormatConverter::toCSV(MYSQL_RES* result, const CSVOptions& opt
     unsigned int num_fields = mysql_num_fields(result);
     MYSQL_FIELD* fields = mysql_fetch_fields(result);
 
-    // Header
+    // Write header row with column names
     if (options.includeHeader) {
         for (unsigned int i = 0; i < num_fields; ++i) {
             if (i > 0) out << options.delimiter;
@@ -22,7 +34,7 @@ std::string MySQLFormatConverter::toCSV(MYSQL_RES* result, const CSVOptions& opt
         out << options.lineEnding;
     }
 
-    // Rows
+    // Write data rows
     MYSQL_ROW row;
     unsigned long* lengths;
 
@@ -33,16 +45,21 @@ std::string MySQLFormatConverter::toCSV(MYSQL_RES* result, const CSVOptions& opt
             if (i > 0) out << options.delimiter;
 
             if (row[i]) {
+                // Use length to handle binary data correctly
                 std::string value(row[i], lengths[i]);
                 out << escapeCSVField(value, options);
             }
-            // NULL values are represented as empty
+            // NULL values are represented as empty fields
         }
         out << options.lineEnding;
     }
 
     return out.str();
 }
+
+// ============================================================================
+// Result Set to JSON Conversion
+// ============================================================================
 
 std::string MySQLFormatConverter::toJSON(MYSQL_RES* result, const JSONOptions& options) {
     if (!result) {
@@ -52,6 +69,7 @@ std::string MySQLFormatConverter::toJSON(MYSQL_RES* result, const JSONOptions& o
     unsigned int num_fields = mysql_num_fields(result);
     MYSQL_FIELD* fields = mysql_fetch_fields(result);
 
+    // Extract column names for JSON keys
     std::vector<std::string> column_names;
     column_names.reserve(num_fields);
     for (unsigned int i = 0; i < num_fields; ++i) {
@@ -70,7 +88,8 @@ std::string MySQLFormatConverter::toJSON(MYSQL_RES* result, const JSONOptions& o
             if (row[i]) {
                 std::string value(row[i], lengths[i]);
 
-                // Try to preserve numeric types
+                // Preserve numeric types in JSON output
+                // IS_NUM macro checks MySQL field type flags
                 if (IS_NUM(fields[i].type)) {
                     try {
                         if (fields[i].type == MYSQL_TYPE_FLOAT ||
@@ -82,6 +101,7 @@ std::string MySQLFormatConverter::toJSON(MYSQL_RES* result, const JSONOptions& o
                             obj[column_names[i]] = std::stoll(value);
                         }
                     } catch (...) {
+                        // Fall back to string if conversion fails
                         obj[column_names[i]] = value;
                     }
                 } else {
@@ -95,6 +115,7 @@ std::string MySQLFormatConverter::toJSON(MYSQL_RES* result, const JSONOptions& o
         arr.push_back(std::move(obj));
     }
 
+    // Format output based on options
     if (options.arrayFormat) {
         return options.pretty ? arr.dump(options.indent) : arr.dump();
     } else {
@@ -120,6 +141,7 @@ std::string MySQLFormatConverter::rowToJSON(MYSQL_ROW row, MYSQL_RES* result,
         if (row[i]) {
             std::string value(row[i], lengths[i]);
 
+            // Apply same numeric type preservation as toJSON
             if (IS_NUM(fields[i].type)) {
                 try {
                     if (fields[i].type == MYSQL_TYPE_FLOAT ||
@@ -143,6 +165,10 @@ std::string MySQLFormatConverter::rowToJSON(MYSQL_ROW row, MYSQL_RES* result,
 
     return options.pretty ? obj.dump(options.indent) : obj.dump();
 }
+
+// ============================================================================
+// SQL Statement Generation
+// ============================================================================
 
 std::string MySQLFormatConverter::buildInsert(const std::string& table,
                                                const RowData& row,
@@ -196,7 +222,7 @@ std::string MySQLFormatConverter::buildUpdate(const std::string& table,
 
     bool first = true;
     for (const auto& [col, val] : row) {
-        // Skip primary key in SET clause
+        // Skip primary key column in SET clause
         if (col == pkColumn) continue;
 
         if (!first) {
@@ -217,6 +243,7 @@ std::string MySQLFormatConverter::buildUpdate(const std::string& table,
         }
     }
 
+    // Add WHERE clause for primary key
     sql << " WHERE " << escapeIdentifier(pkColumn) << " = ";
     if (escape) {
         sql << "'" << escapeSQL(pkValue) << "'";
@@ -244,8 +271,12 @@ std::string MySQLFormatConverter::buildDelete(const std::string& table,
     return sql.str();
 }
 
+// ============================================================================
+// MySQL-Specific Escaping
+// ============================================================================
+
 std::string MySQLFormatConverter::escapeIdentifier(const std::string& identifier) {
-    // Handle database.table format by escaping each part separately
+    // Handle schema.table format by escaping each part separately
     auto dot_pos = identifier.find('.');
     if (dot_pos != std::string::npos) {
         std::string db = identifier.substr(0, dot_pos);
@@ -253,6 +284,8 @@ std::string MySQLFormatConverter::escapeIdentifier(const std::string& identifier
         return escapeIdentifier(db) + "." + escapeIdentifier(table);
     }
 
+    // MySQL uses backticks for identifier quoting
+    // Backticks within identifiers are doubled
     std::string result = "`";
     for (char c : identifier) {
         if (c == '`') {
@@ -266,18 +299,19 @@ std::string MySQLFormatConverter::escapeIdentifier(const std::string& identifier
 }
 
 std::string MySQLFormatConverter::escapeSQL(const std::string& value) {
+    // MySQL uses backslash escaping for special characters
     std::string result;
     result.reserve(value.size() * 2);
 
     for (char c : value) {
         switch (c) {
-            case '\0': result += "\\0"; break;
-            case '\n': result += "\\n"; break;
-            case '\r': result += "\\r"; break;
-            case '\\': result += "\\\\"; break;
-            case '\'': result += "\\'"; break;
-            case '"':  result += "\\\""; break;
-            case '\x1a': result += "\\Z"; break;
+            case '\0': result += "\\0"; break;    // NUL byte
+            case '\n': result += "\\n"; break;    // Newline
+            case '\r': result += "\\r"; break;    // Carriage return
+            case '\\': result += "\\\\"; break;   // Backslash
+            case '\'': result += "\\'"; break;    // Single quote
+            case '"':  result += "\\\""; break;   // Double quote
+            case '\x1a': result += "\\Z"; break;  // Ctrl+Z (Windows EOF)
             default:   result += c; break;
         }
     }

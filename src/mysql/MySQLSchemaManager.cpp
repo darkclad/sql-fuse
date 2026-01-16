@@ -1,3 +1,11 @@
+/**
+ * @file MySQLSchemaManager.cpp
+ * @brief Implementation of MySQL schema and metadata manager.
+ *
+ * Implements the MySQLSchemaManager class which provides metadata queries
+ * for MySQL databases using INFORMATION_SCHEMA and SHOW commands.
+ */
+
 #include "MySQLSchemaManager.hpp"
 #include "MySQLResultSet.hpp"
 #include "ErrorHandler.hpp"
@@ -7,11 +15,20 @@
 
 namespace sqlfuse {
 
+// ============================================================================
+// Construction
+// ============================================================================
+
 MySQLSchemaManager::MySQLSchemaManager(MySQLConnectionPool& pool, CacheManager& cache)
     : m_pool(pool), m_cache(cache) {
 }
 
+// ============================================================================
+// Escaping Utilities
+// ============================================================================
+
 std::string MySQLSchemaManager::escapeIdentifier(const std::string& id) const {
+    // MySQL uses backticks for identifier quoting
     std::string result = "`";
     for (char c : id) {
         if (c == '`') result += "``";
@@ -22,6 +39,7 @@ std::string MySQLSchemaManager::escapeIdentifier(const std::string& id) const {
 }
 
 std::string MySQLSchemaManager::escapeString(const std::string& str) const {
+    // MySQL uses backslash escaping for string literals
     std::string result;
     result.reserve(str.size() * 2);
     for (char c : str) {
@@ -38,7 +56,12 @@ std::string MySQLSchemaManager::escapeString(const std::string& str) const {
     return result;
 }
 
+// ============================================================================
+// Database Operations
+// ============================================================================
+
 std::vector<std::string> MySQLSchemaManager::getDatabases() {
+    // Query: SHOW DATABASES
     std::string cache_key = "databases";
 
     if (auto cached = m_cache.get(cache_key)) {
@@ -83,7 +106,12 @@ bool MySQLSchemaManager::databaseExists(const std::string& database) {
     return std::find(databases.begin(), databases.end(), database) != databases.end();
 }
 
+// ============================================================================
+// Table Operations
+// ============================================================================
+
 std::vector<std::string> MySQLSchemaManager::getTables(const std::string& database) {
+    // Query: SHOW FULL TABLES ... WHERE Table_type = 'BASE TABLE'
     std::string cache_key = CacheManager::makeKey(database, "tables");
 
     if (auto cached = m_cache.get(cache_key)) {
@@ -131,6 +159,7 @@ bool MySQLSchemaManager::tableExists(const std::string& database, const std::str
 
 std::vector<ColumnInfo> MySQLSchemaManager::getColumns(const std::string& database,
                                                         const std::string& table) {
+    // Query: INFORMATION_SCHEMA.COLUMNS
     std::vector<ColumnInfo> columns;
 
     auto conn = m_pool.acquire();
@@ -170,6 +199,8 @@ std::vector<ColumnInfo> MySQLSchemaManager::getColumns(const std::string& databa
 
 std::vector<IndexInfo> MySQLSchemaManager::getIndexes(const std::string& database,
                                                        const std::string& table) {
+    // Query: SHOW INDEX FROM table
+    // Multi-column indexes produce multiple rows with same Key_name
     std::vector<IndexInfo> indexes;
 
     auto conn = m_pool.acquire();
@@ -213,6 +244,7 @@ std::vector<IndexInfo> MySQLSchemaManager::getIndexes(const std::string& databas
 
 std::optional<TableInfo> MySQLSchemaManager::getTableInfo(const std::string& database,
                                                            const std::string& table) {
+    // Query: INFORMATION_SCHEMA.TABLES
     auto conn = m_pool.acquire();
     std::string sql = "SELECT TABLE_NAME, ENGINE, TABLE_COLLATION, TABLE_COMMENT, "
                       "CREATE_TIME, UPDATE_TIME, TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH, "
@@ -259,7 +291,12 @@ std::optional<TableInfo> MySQLSchemaManager::getTableInfo(const std::string& dat
     return info;
 }
 
+// ============================================================================
+// View Operations
+// ============================================================================
+
 std::vector<std::string> MySQLSchemaManager::getViews(const std::string& database) {
+    // Query: SHOW FULL TABLES ... WHERE Table_type = 'VIEW'
     std::string cache_key = CacheManager::makeKey(database, "views");
 
     if (auto cached = m_cache.get(cache_key)) {
@@ -330,7 +367,12 @@ std::optional<ViewInfo> MySQLSchemaManager::getViewInfo(const std::string& datab
     return info;
 }
 
+// ============================================================================
+// Routine Operations (Procedures and Functions)
+// ============================================================================
+
 std::vector<std::string> MySQLSchemaManager::getProcedures(const std::string& database) {
+    // Query: INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_TYPE = 'PROCEDURE'
     std::vector<std::string> procedures;
 
     auto conn = m_pool.acquire();
@@ -355,6 +397,7 @@ std::vector<std::string> MySQLSchemaManager::getProcedures(const std::string& da
 }
 
 std::vector<std::string> MySQLSchemaManager::getFunctions(const std::string& database) {
+    // Query: INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_TYPE = 'FUNCTION'
     std::vector<std::string> functions;
 
     auto conn = m_pool.acquire();
@@ -417,7 +460,12 @@ std::optional<RoutineInfo> MySQLSchemaManager::getRoutineInfo(const std::string&
     return info;
 }
 
+// ============================================================================
+// Trigger Operations
+// ============================================================================
+
 std::vector<std::string> MySQLSchemaManager::getTriggers(const std::string& database) {
+    // Query: INFORMATION_SCHEMA.TRIGGERS
     std::vector<std::string> triggers;
 
     auto conn = m_pool.acquire();
@@ -473,9 +521,14 @@ std::optional<TriggerInfo> MySQLSchemaManager::getTriggerInfo(const std::string&
     return info;
 }
 
+// ============================================================================
+// DDL Statement Generation
+// ============================================================================
+
 std::string MySQLSchemaManager::getCreateStatement(const std::string& database,
                                                     const std::string& object,
                                                     const std::string& type) {
+    // Query: SHOW CREATE {TABLE|VIEW|PROCEDURE|FUNCTION|TRIGGER}
     auto conn = m_pool.acquire();
     std::string sql;
 
@@ -523,7 +576,12 @@ std::string MySQLSchemaManager::getCreateStatement(const std::string& database,
     return "";
 }
 
+// ============================================================================
+// Server Information
+// ============================================================================
+
 ServerInfo MySQLSchemaManager::getServerInfo() {
+    // Queries: SELECT VERSION(), SHOW GLOBAL STATUS, @@version_comment
     ServerInfo info;
 
     auto conn = m_pool.acquire();
@@ -570,7 +628,12 @@ ServerInfo MySQLSchemaManager::getServerInfo() {
     return info;
 }
 
+// ============================================================================
+// User Management
+// ============================================================================
+
 std::vector<UserInfo> MySQLSchemaManager::getUsers() {
+    // Query: mysql.user system table (requires privileges)
     std::vector<UserInfo> users;
 
     auto conn = m_pool.acquire();
@@ -598,7 +661,12 @@ std::vector<UserInfo> MySQLSchemaManager::getUsers() {
     return users;
 }
 
+// ============================================================================
+// Server Variables
+// ============================================================================
+
 std::unordered_map<std::string, std::string> MySQLSchemaManager::getGlobalVariables() {
+    // Query: SHOW GLOBAL VARIABLES
     std::unordered_map<std::string, std::string> vars;
 
     auto conn = m_pool.acquire();
@@ -619,6 +687,7 @@ std::unordered_map<std::string, std::string> MySQLSchemaManager::getGlobalVariab
 }
 
 std::unordered_map<std::string, std::string> MySQLSchemaManager::getSessionVariables() {
+    // Query: SHOW SESSION VARIABLES
     std::unordered_map<std::string, std::string> vars;
 
     auto conn = m_pool.acquire();
@@ -638,10 +707,15 @@ std::unordered_map<std::string, std::string> MySQLSchemaManager::getSessionVaria
     return vars;
 }
 
+// ============================================================================
+// Row Operations
+// ============================================================================
+
 std::vector<std::string> MySQLSchemaManager::getRowIds(const std::string& database,
                                                         const std::string& table,
                                                         size_t limit,
                                                         size_t offset) {
+    // Returns primary key values for row-level file access
     std::vector<std::string> ids;
 
     // Get primary key column
@@ -691,6 +765,10 @@ uint64_t MySQLSchemaManager::getRowCount(const std::string& database, const std:
 
     return 0;
 }
+
+// ============================================================================
+// Cache Invalidation
+// ============================================================================
 
 void MySQLSchemaManager::invalidateTable(const std::string& database, const std::string& table) {
     m_cache.invalidateTable(database, table);
