@@ -375,26 +375,70 @@ int SQLiteVirtualFile::handleRowWrite() {
 
         RowData row = FormatConverter::parseJSONRow(m_writeBuffer);
 
-        // Build UPDATE statement
-        std::ostringstream sql;
-        sql << "UPDATE \"" << m_path.object_name << "\" SET ";
+        auto conn = pool->acquire();
 
-        bool first = true;
-        for (const auto& [key, value] : row) {
-            if (key == table_info->primaryKeyColumn) continue;
-            if (!first) sql << ", ";
-            if (value.has_value()) {
-                sql << "\"" << key << "\" = '" << SQLiteFormatConverter::escapeSQL(value.value()) << "'";
-            } else {
-                sql << "\"" << key << "\" = NULL";
+        // Check if row exists (by checking if row_id is numeric and exists)
+        bool rowExists = false;
+        bool isNumericId = !m_path.row_id.empty() &&
+                          m_path.row_id.find_first_not_of("0123456789") == std::string::npos;
+
+        if (isNumericId) {
+            std::string checkSql = "SELECT 1 FROM \"" + m_path.object_name +
+                                   "\" WHERE \"" + table_info->primaryKeyColumn + "\" = '" +
+                                   SQLiteFormatConverter::escapeSQL(m_path.row_id) + "'";
+            sqlite3_stmt* stmt = conn->prepare(checkSql);
+            if (stmt) {
+                SQLiteResultSet result(stmt);
+                rowExists = result.step();
             }
-            first = false;
         }
 
-        sql << " WHERE \"" << table_info->primaryKeyColumn << "\" = '"
-            << SQLiteFormatConverter::escapeSQL(m_path.row_id) << "'";
+        std::ostringstream sql;
 
-        auto conn = pool->acquire();
+        if (rowExists) {
+            // UPDATE existing row
+            sql << "UPDATE \"" << m_path.object_name << "\" SET ";
+
+            bool first = true;
+            for (const auto& [key, value] : row) {
+                if (key == table_info->primaryKeyColumn) continue;
+                if (!first) sql << ", ";
+                if (value.has_value()) {
+                    sql << "\"" << key << "\" = '" << SQLiteFormatConverter::escapeSQL(value.value()) << "'";
+                } else {
+                    sql << "\"" << key << "\" = NULL";
+                }
+                first = false;
+            }
+
+            sql << " WHERE \"" << table_info->primaryKeyColumn << "\" = '"
+                << SQLiteFormatConverter::escapeSQL(m_path.row_id) << "'";
+        } else {
+            // INSERT new row
+            sql << "INSERT INTO \"" << m_path.object_name << "\" (";
+
+            bool first = true;
+            for (const auto& [key, value] : row) {
+                if (!first) sql << ", ";
+                sql << "\"" << key << "\"";
+                first = false;
+            }
+
+            sql << ") VALUES (";
+
+            first = true;
+            for (const auto& [key, value] : row) {
+                if (!first) sql << ", ";
+                if (value.has_value()) {
+                    sql << "'" << SQLiteFormatConverter::escapeSQL(value.value()) << "'";
+                } else {
+                    sql << "NULL";
+                }
+                first = false;
+            }
+
+            sql << ")";
+        }
 
         if (!conn->execute(sql.str())) {
             m_lastError = conn->error();

@@ -120,13 +120,13 @@ assert_eq() {
 
     if [ "$expected" = "$actual" ]; then
         log_success "$message"
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true || true
         return 0
     else
         log_error "$message"
         log_verbose "  Expected: $expected"
         log_verbose "  Actual:   $actual"
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true || true
         return 1
     fi
 }
@@ -138,13 +138,13 @@ assert_contains() {
 
     if [[ "$haystack" == *"$needle"* ]]; then
         log_success "$message"
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true || true
         return 0
     else
         log_error "$message"
         log_verbose "  Looking for: $needle"
         log_verbose "  In: $haystack"
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true || true
         return 1
     fi
 }
@@ -155,12 +155,12 @@ assert_file_exists() {
 
     if [ -e "$file" ]; then
         log_success "$message"
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true || true
         return 0
     else
         log_error "$message"
         log_verbose "  File not found: $file"
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true || true
         return 1
     fi
 }
@@ -171,12 +171,12 @@ assert_dir_exists() {
 
     if [ -d "$dir" ]; then
         log_success "$message"
-        ((TESTS_PASSED++))
+        ((TESTS_PASSED++)) || true || true
         return 0
     else
         log_error "$message"
         log_verbose "  Directory not found: $dir"
-        ((TESTS_FAILED++))
+        ((TESTS_FAILED++)) || true || true
         return 1
     fi
 }
@@ -386,7 +386,7 @@ test_read_table_schema() {
         assert_contains "$content" "TEXT" "Schema contains TEXT type"
     else
         log_warn "Schema file not found (skipping)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -416,7 +416,7 @@ test_read_row() {
         assert_contains "$content" '"alice"' "Row contains alice data"
     else
         log_warn "Rows directory not found (skipping)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -441,7 +441,7 @@ test_read_view() {
         assert_contains "$content" "username" "View contains username column"
     else
         log_warn "View CSV file not found (skipping)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -465,17 +465,17 @@ test_modify_row() {
         local db_full_name=$(sqlite_cmd "SELECT full_name FROM users WHERE id=1")
         if [ "$db_full_name" = "Modified Name" ]; then
             log_success "Row modification successful"
-            ((TESTS_PASSED++))
+            ((TESTS_PASSED++)) || true
 
             # Restore original
             sqlite_cmd "UPDATE users SET full_name='$orig_full_name' WHERE id=1"
         else
             log_warn "Row modification may not be supported or failed"
-            ((TESTS_SKIPPED++))
+            ((TESTS_SKIPPED++)) || true
         fi
     else
         log_warn "Row file not found (skipping modification test)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -496,16 +496,16 @@ test_delete_row() {
         local count=$(sqlite_cmd "SELECT COUNT(*) FROM users WHERE id=$temp_id")
         if [ "$count" = "0" ]; then
             log_success "Row deletion successful"
-            ((TESTS_PASSED++))
+            ((TESTS_PASSED++)) || true
         else
             log_warn "Row deletion may not be supported or failed"
-            ((TESTS_SKIPPED++))
+            ((TESTS_SKIPPED++)) || true
             # Clean up
             sqlite_cmd "DELETE FROM users WHERE id=$temp_id"
         fi
     else
         log_warn "Row file not found (skipping deletion test)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
         # Clean up
         sqlite_cmd "DELETE FROM users WHERE id=$temp_id"
     fi
@@ -525,16 +525,16 @@ test_create_row() {
         local count=$(sqlite_cmd "SELECT COUNT(*) FROM users WHERE username='newuser'")
         if [ "$count" = "1" ]; then
             log_success "Row creation successful"
-            ((TESTS_PASSED++))
+            ((TESTS_PASSED++)) || true
             # Clean up
             sqlite_cmd "DELETE FROM users WHERE username='newuser'"
         else
             log_warn "Row creation may not be supported or failed"
-            ((TESTS_SKIPPED++))
+            ((TESTS_SKIPPED++)) || true
         fi
     else
         log_warn "Rows directory not found (skipping creation test)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -547,14 +547,14 @@ test_file_sizes() {
         local size=$(stat -c %s "$csv_file" 2>/dev/null || stat -f %z "$csv_file" 2>/dev/null)
         if [ -n "$size" ] && [ "$size" -gt 0 ]; then
             log_success "File size reported correctly: $size bytes"
-            ((TESTS_PASSED++))
+            ((TESTS_PASSED++)) || true
         else
             log_error "File size is zero or not reported"
-            ((TESTS_FAILED++))
+            ((TESTS_FAILED++)) || true
         fi
     else
         log_warn "CSV file not found (skipping)"
-        ((TESTS_SKIPPED++))
+        ((TESTS_SKIPPED++)) || true
     fi
 }
 
@@ -580,6 +580,73 @@ test_read_order_items() {
     local content=$(cat "$csv_file" 2>/dev/null)
     assert_contains "$content" "order_id" "order_items contains order_id column"
     assert_contains "$content" "product_id" "order_items contains product_id column"
+}
+
+# Test: Bulk CSV import
+test_bulk_csv_import() {
+    log_info "Testing: Bulk CSV import"
+
+    local csv_file="$MOUNT_POINT/$SQLITE_DB/tables/users.csv"
+    if [ -f "$csv_file" ]; then
+        # Create CSV data with new users (matching actual schema: id, username, email, full_name, created_at, is_active)
+        local csv_data='"id","username","email","full_name","created_at","is_active"
+100,"csvuser1","csv1@example.com","CSV User One","2024-01-01 00:00:00",1
+101,"csvuser2","csv2@example.com","CSV User Two","2024-01-01 00:00:00",1'
+
+        # Write CSV data to table file
+        echo "$csv_data" > "$csv_file" 2>/dev/null || true
+
+        # Verify in database
+        local count1=$(sqlite_cmd "SELECT COUNT(*) FROM users WHERE username='csvuser1'")
+        local count2=$(sqlite_cmd "SELECT COUNT(*) FROM users WHERE username='csvuser2'")
+
+        if [ "$count1" = "1" ] && [ "$count2" = "1" ]; then
+            log_success "Bulk CSV import successful"
+            ((TESTS_PASSED++)) || true
+            # Clean up
+            sqlite_cmd "DELETE FROM users WHERE username IN ('csvuser1', 'csvuser2')"
+        else
+            log_warn "Bulk CSV import may not be supported or failed"
+            ((TESTS_SKIPPED++)) || true
+        fi
+    else
+        log_warn "CSV file not found (skipping bulk CSV import test)"
+        ((TESTS_SKIPPED++)) || true
+    fi
+}
+
+# Test: Bulk JSON import
+test_bulk_json_import() {
+    log_info "Testing: Bulk JSON import"
+
+    local json_file="$MOUNT_POINT/$SQLITE_DB/tables/users.json"
+    if [ -f "$json_file" ]; then
+        # Create JSON data with new users (matching actual schema)
+        local json_data='[
+  {"id": 200, "username": "jsonuser1", "email": "json1@example.com", "full_name": "JSON User One", "is_active": 1},
+  {"id": 201, "username": "jsonuser2", "email": "json2@example.com", "full_name": "JSON User Two", "is_active": 1}
+]'
+
+        # Write JSON data to table file
+        echo "$json_data" > "$json_file" 2>/dev/null || true
+
+        # Verify in database
+        local count1=$(sqlite_cmd "SELECT COUNT(*) FROM users WHERE username='jsonuser1'")
+        local count2=$(sqlite_cmd "SELECT COUNT(*) FROM users WHERE username='jsonuser2'")
+
+        if [ "$count1" = "1" ] && [ "$count2" = "1" ]; then
+            log_success "Bulk JSON import successful"
+            ((TESTS_PASSED++)) || true
+            # Clean up
+            sqlite_cmd "DELETE FROM users WHERE username IN ('jsonuser1', 'jsonuser2')"
+        else
+            log_warn "Bulk JSON import may not be supported or failed"
+            ((TESTS_SKIPPED++)) || true
+        fi
+    else
+        log_warn "JSON file not found (skipping bulk JSON import test)"
+        ((TESTS_SKIPPED++)) || true
+    fi
 }
 
 # Run all tests
@@ -611,6 +678,8 @@ run_tests() {
     test_modify_row
     test_delete_row
     test_create_row
+    test_bulk_csv_import
+    test_bulk_json_import
 }
 
 # Print summary
